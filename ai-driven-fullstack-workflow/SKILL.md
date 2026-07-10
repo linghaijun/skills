@@ -1,6 +1,6 @@
 ---
 name: "ai-driven-fullstack-workflow"
-description: "8-step fullstack dev workflow (Checklist→Plan→DDL→API→FrontendDesign→TestMatrix→Coding→Test+Debug) covering both backend and frontend, per-step human review gating, unit tests written after all business code, docs in docs/develop/{branch}-{title}-{id}/. Invoke when developing fullstack features needing both backend and frontend, or user mentions 前后端/全栈/frontend+backend."
+description: "9-step fullstack dev workflow (Checklist→Plan→DDL→API→FrontendDesign→TestMatrix→Coding→Test+Debug→AIReview) covering both backend and frontend, per-step human review gating, unit tests written after all business code, docs in docs/develop/{branch}-{title}-{id}/. Invoke when developing fullstack features needing both backend and frontend, or user mentions 前后端/全栈/frontend+backend."
 ---
 
 # AI 驱动型全栈开发全流程操作手册（AI-Driven Fullstack Workflow）
@@ -9,7 +9,7 @@ description: "8-step fullstack dev workflow (Checklist→Plan→DDL→API→Fron
 
 ## 核心原则（CRITICAL）
 
-1. **顺序不可跳跃**：必须严格按 第一步 → 第八步 的顺序执行，每一步的产出物是下一步的强制输入。
+1. **顺序不可跳跃**：必须严格按 第一步 → 第九步 的顺序执行，每一步的产出物是下一步的强制输入。
 2. **每步独立完成 + 人工 Review 门控**：每一步单独完成，完成后**必须暂停**，向用户汇报产出物路径并**显式请求人工 review 确认**；未获人工 review 通过前，**禁止进入下一步**。
 3. **不一次性写完所有代码**：第七步是核心防错机制，必须拿着第一步的 Checklist **一条一条**喂给 AI，逐个击破。
 4. **每步产出物必须落地为文档**：Checklist.md、后端/前端技术设计文档.md、ddl.sql、API接口定义文档.md、前端页面与组件设计文档.md、后端/前端测试矩阵.md，禁止只在对话中口头产出。
@@ -17,6 +17,7 @@ description: "8-step fullstack dev workflow (Checklist→Plan→DDL→API→Fron
 6. **前后端契约先行**：第四步 API 契约是前后端的**唯一桥梁**，前端任何步骤不得脱离该契约臆造字段或接口。
 7. **测试代码延后编写**：BDD Checklist（第一步）与测试矩阵（第六步）在编码前制定；但**单元测试/组件测试代码统一在所有业务代码完成后（第八步 8.1）再编写**，第七步禁止写测试。
 8. **最后统一调试**：编译、运行测试与自愈放在最后（第八步 8.2）统一做，不要边写边调。
+9. **第九步为最终质量门禁**：编译通过 + 测试全部 Pass ≠ 需求全部实现。必须执行第九步 AI Review，逐条回溯 Checklist，确保交付物与需求零偏差后方可交付。
 
 ## 触发条件（When to Invoke）
 
@@ -25,7 +26,7 @@ description: "8-step fullstack dev workflow (Checklist→Plan→DDL→API→Fron
 - 用户提供了 PRD 文本、UI 界面截图、业务背景描述，要求**同时**开发后端接口和前端页面
 - 用户提及 "BDD / TDD / Checklist / 需求拆解" 且需求涉及前端 UI 交互
 - 用户要求按规范流程开发一个完整的全栈业务模块
-- 用户明确说"按全栈流程"或"按八步流程"
+- 用户明确说"按全栈流程"或"按九步流程"
 
 > 注意：若需求**仅**后端（无前端 UI），应改用 `ai-driven-backend-workflow` skill；若**仅**前端页面美化/静态页面，应改用 `frontend-design` / `web-dev` skill。本 skill 适用于**前后端联动**的场景。
 
@@ -41,6 +42,7 @@ description: "8-step fullstack dev workflow (Checklist→Plan→DDL→API→Fron
 | 6 | 测试用例矩阵制定（后端 + 前端） | Checklist + API 文档 + 前端设计 | 后端单元测试验证指标矩阵.md + 前端测试验证指标矩阵.md |
 | 7 | 逐条编码（后端业务代码 + 前端业务代码） | 1~6 步全部产出物 | 后端生产代码 + 前端生产代码 |
 | 8 | 编写测试 + 编译自愈（后端 + 前端） | 第 7 步全部代码 + 第 6 步矩阵 + 报错日志 | 全部 Pass 的测试 + 编译通过的模块 |
+| 9 | AI Review —— 需求回溯与代码合规审查 | 第 1 步 Checklist + 第 4 步 API 文档 + 第 6 步测试矩阵 + 第 7/8 步全部代码 | AI Review 报告（Checklist回溯表 + API契约检查 + 代码质量评分 + 缺陷清单） |
 
 ---
 
@@ -294,6 +296,115 @@ docs/develop/feature-share-audit-CP-48771/
 
 ---
 
+## 第九步：AI Review —— 需求回溯与代码合规审查（AI Review）
+
+> 本步是交付前的**最终质量门禁**。所有代码已通过编译和测试，但编译通过 ≠ 需求全部实现。必须拿第一步的 Checklist 逐条回溯比对，确保交付物与需求零偏差。
+
+**输入**：
+- 第一步的《Checklist.md》（需求行为标准，含前端/后端/前后端场景）
+- 第四步的《API接口定义文档.md》（契约标准）
+- 第六步的两份测试矩阵（后端 + 前端测试覆盖标准）
+- 第七步产出的全部业务代码（后端 + 前端）
+- 第八步产出的全部测试代码（后端单测 + 前端组件测试）
+
+**执行动作**：AI 以独立审查者视角，对全部交付物进行五维审查，并输出格式化审查报告。
+
+**五维审查维度**：
+
+**维度 A：需求回溯（Checklist Backtracking）**
+- 将第一步 Checklist 中的**每一条** Given-When-Then（含 `[前端]` / `[后端]` / `[前后端]` 标签），与代码中的对应实现逐一比对。
+- 判定每一条状态：`✅ 已实现` / `⚠️ 部分实现` / `❌ 未实现`。
+- 对于 `⚠️` 或 `❌` 的条目，必须给出**具体缺失了什么**（如："[后端] 缺少 When 条件中的 X 过滤逻辑" / "[前端] 未实现 loading 态"）。
+
+**维度 B：前后端契约一致性审查（Frontend-Backend Contract Consistency）**
+- 对比前端 API 调用代码（API 层/请求函数）与第四步 API 契约，检查 URL、Method、请求参数、响应字段是否一致。
+- 对比后端 Controller 接口与第四步 API 契约，确保两端匹配。
+- 发现前后端不一致时标记为 `🔴 Contract Misalignment`，明确哪一端偏离了契约。
+
+**维度 C：API 契约合规（API Contract Compliance）**
+- 将第四步 API 文档中的每个端点，与 Controller 代码逐一比对。
+- 检查项：URL 路径、HTTP Method、请求参数（类型/必填/校验注解）、响应结构（字段名/类型）。
+- 发现不一致时标记为 `🔴 Contract Breach` 并说明偏差。
+
+**维度 D：测试覆盖审计（Test Coverage Audit）**
+- 后端：将《后端单元测试验证指标矩阵》中的每条分支，与第八步的后端单测逐一比对。
+- 前端：将《前端测试验证指标矩阵》中的每条分支，与第八步的前端组件测试逐一比对。
+- 标记缺失的测试分支，判定 `✅ 已覆盖` / `⚠️ 边界缺失` / `❌ 分支缺失`。
+
+**维度 E：代码质量扫描（Code Quality Scan）**
+- **未捕获异常**：是否存在 `throws Exception` 或空 `catch` 块。
+- **魔法值**：是否存在硬编码的字面常量（如数字 `3`、字符串 `"active"`）应抽取为常量或枚举。
+- **安全风险**：是否存在 SQL 拼接、未鉴权的接口、敏感数据明文传输。
+- **事务完整性**：跨表写操作是否标注 `@Transactional`。
+- **前端质量**：是否存在未处理的 Promise reject、硬编码的 URL、缺少 key 属性的列表渲染、不必要的 re-render。
+
+**AI 提示词关键约束**：
+- 审查必须**逐条、逐端点、逐分支**进行，不得笼统概括。
+- 每条发现必须附带**精确的文件行号**（如 `ShareController.java:42`、`ShareDialog.tsx:35`）。
+- 禁止在未产生实际缺陷时凭空编造问题。
+
+**产出物**：`docs/develop/{git版本}-{需求title}-{需求id}/AI Review报告.md`，包含：
+
+```markdown
+# AI Review 报告
+
+## 📋 审查概要
+- 总 Checklist 条目数：X
+- ✅ 完全实现：X | ⚠️ 部分实现：X | ❌ 未实现：X
+- 🔴 前后端契约不一致：X
+- 🔴 API 契约违规：X
+- ❌ 缺失测试分支（后端/前端）：X
+- 🐛 代码质量缺陷：X
+- 整体评估：✅ PASS / ⚠️ CONDITIONAL PASS / ❌ FAIL
+
+## A. 需求回溯表
+| # | Checklist 条目 | 归属 | 状态 | 实现位置 | 缺失说明 |
+|---|---------------|------|------|---------|---------|
+| 1 | SHARE - 资产详情页分享入口 | 前后端 | ✅ | ShareController.java:25 / ShareDialog.tsx:10 | - |
+| 2 | SHARE - 详情页审核状态展示 | 后端 | ⚠️ | AssetServiceImpl.java:88 | 仅实现了 Approve/Deny 状态，未处理 Processing 状态的轮询展示 |
+| 3 | SHARE - 审核状态 UI 展示 | 前端 | ❌ | - | 整个条目未实现 |
+
+## B. 前后端契约一致性
+| 端点 | 前端调用 | 后端实现 | 状态 |
+|------|---------|---------|------|
+| GET /api/shares | api/shares (正确) | ShareController.java:15 (正确) | ✅ |
+| POST /api/shares | api/share (少 s) | ShareController.java:30 /api/shares | 🔴 前端 URL 拼写错误 |
+
+## C. API 契约违规
+| 端点 | 预期 (API 文档) | 实际 (代码) | 严重程度 |
+|------|----------------|------------|---------|
+| GET /api/shares | 参数 pageSize=10 | 参数 pageSize 未设默认值 | Minor |
+
+## D. 测试覆盖审计
+| Checklist 条目 | 端侧 | 正向流程 | 边界值 | 异常流 |
+|---------------|------|---------|-------|-------|
+| 1 - 分享入口 | 后端 | ✅ | ❌ 未测试空素材列表 | ❌ 未测试无权限用户 |
+| 1 - 分享入口 | 前端 | ✅ | ✅ | ❌ 未测试 API 4xx 错误弹窗 |
+| 2 - 审核状态 | 后端 | ✅ | ✅ | ✅ |
+
+## E. 代码质量缺陷
+| 文件 | 行号 | 端侧 | 缺陷类型 | 建议 |
+|------|------|------|---------|------|
+| ShareController.java | 42 | 后端 | 魔法值 | 将硬编码的 "active" 抽取为常量 STATUS_ACTIVE |
+| ShareDialog.tsx | 88 | 前端 | 未处理 Promise | onShare() 中缺少 .catch 处理 |
+
+## F. 审查结论
+**评估**：⚠️ CONDITIONAL PASS
+**必须修复**：前后端契约不一致 🔴 1 处、缺失的 2 个后端测试分支
+**建议修复**：3 处魔法值、1 处未处理 Promise
+**审批**：请在修复后重新审查，或由人工审批跳过 minor 项。
+```
+
+**审查终止条件**：
+- 若审查结果为 `✅ PASS`，则整个流程结束，交付完成。
+- 若审查结果为 `⚠️ CONDITIONAL PASS`，标记必须修复和可选修复项，AI 自动修复后重新执行第九步。
+- 若审查结果为 `❌ FAIL`，AI 自动修复所有缺陷后重新执行第九步。
+- **循环限制**：重新审查最多 2 轮。若第 2 轮审查仍为 FAIL，则**停止自动修复**，输出完整缺陷清单请求人工介入。
+
+**完成后（人工 Review 门控）**：将 AI Review 报告落盘到 docs 目录，向用户汇报审查结论，并**暂停**请求人工审批最终交付物；用户确认后整个流程正式结束。
+
+---
+
 ## 项目上下文适配（针对本仓库）
 
 本仓库为 Spring Boot 微服务架构项目（见 `AGENTS.md`），主要模块：
@@ -327,3 +438,5 @@ docs/develop/feature-share-audit-CP-48771/
 - [ ] 第七步是否做到了"逐条 Checklist 编码"且**未编写测试**（测试留到第八步 8.1）？
 - [ ] 第七步前后端编码是否遵循依赖顺序（后端接口先行或前端按契约 mock）？
 - [ ] 第八步是否在所有业务代码完成后才统一编写测试，并在 8.2 编译自愈？
+- [ ] 第九步是否已执行五维审查（含前后端契约一致性），逐条回溯 Checklist，并输出《AI Review 报告》？
+- [ ] 第九步审查结论是否为 ✅ PASS 或 ⚠️ CONDITIONAL PASS（且必须修复项已修复）？

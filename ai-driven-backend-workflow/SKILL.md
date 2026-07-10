@@ -1,6 +1,6 @@
 ---
 name: "ai-driven-backend-workflow"
-description: "7-step backend dev workflow (Checklist→Plan→DDL→API→TestMatrix→Coding→Test+Debug), per-step human review gating, unit tests written after all business code, docs in docs/develop/{branch}-{title}-{id}/. Invoke when developing backend features or user mentions PRD/需求/BDD/TDD."
+description: "8-step backend dev workflow (Checklist→Plan→DDL→API→TestMatrix→Coding→Test+Debug→AIReview), per-step human review gating, unit tests written after all business code, docs in docs/develop/{branch}-{title}-{id}/. Invoke when developing backend features or user mentions PRD/需求/BDD/TDD."
 ---
 
 # AI 驱动型后端开发全流程操作手册（AI-Driven Backend Workflow）
@@ -9,13 +9,14 @@ description: "7-step backend dev workflow (Checklist→Plan→DDL→API→TestMa
 
 ## 核心原则（CRITICAL）
 
-1. **顺序不可跳跃**：必须严格按 第一步 → 第七步 的顺序执行，每一步的产出物是下一步的强制输入。
+1. **顺序不可跳跃**：必须严格按 第一步 → 第八步 的顺序执行，每一步的产出物是下一步的强制输入。
 2. **每步独立完成 + 人工 Review 门控**：每一步单独完成，完成后**必须暂停**，向用户汇报产出物路径并**显式请求人工 review 确认**；未获人工 review 通过前，**禁止进入下一步**。
 3. **不一次性写完所有代码**：第六步是核心防错机制，必须拿着第一步的 Checklist **一条一条**喂给 AI，逐个击破。
 4. **每步产出物必须落地为文档**：Checklist.md、技术设计与实现方案文档.md、ddl.sql、API接口定义文档.md、单元测试验证指标矩阵.md，禁止只在对话中口头产出。
 5. **统一文档输出目录**：所有产出文档统一放在 `docs/develop/{git版本}-{需求title}-{需求id}/` 目录下（详见"文档输出目录规范"章节）。
 6. **测试代码延后编写**：BDD Checklist（第一步）与测试矩阵（第五步）在编码前制定；但**单元测试代码统一在所有业务代码完成后（第七步 7.1）再编写**，第六步禁止写单测。
 7. **最后统一调试**：编译、运行单测与自愈放在最后（第七步 7.2）统一做，不要边写边调。
+8. **第八步为最终质量门禁**：编译通过 + 单测全部 Pass ≠ 需求全部实现。必须执行第八步 AI Review，逐条回溯 Checklist，确保交付物与需求零偏差后方可交付。
 
 ## 触发条件（When to Invoke）
 
@@ -24,7 +25,7 @@ description: "7-step backend dev workflow (Checklist→Plan→DDL→API→TestMa
 - 用户提供了 PRD 文本、UI 界面截图、业务背景描述，要求开发
 - 用户提及 "BDD / TDD / Checklist / 需求拆解 / 接口设计 / DDL 设计"
 - 用户要求按规范流程开发一个完整的后端业务模块
-- 用户明确说"按 AI 驱动型后端流程"或"按七步流程"
+- 用户明确说"按 AI 驱动型后端流程"或"按八步流程"
 
 ## 工作流总览
 
@@ -37,6 +38,7 @@ description: "7-step backend dev workflow (Checklist→Plan→DDL→API→TestMa
 | 5 | 测试用例矩阵制定 | Checklist + API 文档 | 单元测试验证指标矩阵.md |
 | 6 | 逐条编码（仅业务代码，禁止写单测） | 1~5 步全部产出物 | 生产代码（Controller/Service/Mapper/DTO） |
 | 7 | 编写单测 + 编译自愈 | 第 6 步全部业务代码 + 第 5 步测试矩阵 + 报错日志 | 全部 Pass 的单测 + 编译通过的模块 |
+| 8 | AI Review —— 需求回溯与代码合规审查 | 第 1 步 Checklist + 第 4 步 API 文档 + 第 5 步测试矩阵 + 第 6/7 步全部代码 | AI Review 报告（Checklist回溯表 + API契约检查 + 代码质量评分 + 缺陷清单） |
 
 ---
 
@@ -232,6 +234,101 @@ docs/develop/feature-share-audit-CP-48771/
 
 ---
 
+## 第八步：AI Review —— 需求回溯与代码合规审查（AI Review）
+
+> 本步是交付前的**最终质量门禁**。所有代码已通过编译和单测，但编译通过 ≠ 需求全部实现。必须拿第一步的 Checklist 逐条回溯比对，确保交付物与需求零偏差。
+
+**输入**：
+- 第一步的《Checklist.md》（需求行为标准）
+- 第四步的《API接口定义文档.md》（契约标准）
+- 第五步的《单元测试验证指标矩阵.md》（测试覆盖标准）
+- 第六步产出的全部业务代码
+- 第七步产出的全部单元测试代码
+
+**执行动作**：AI 以独立审查者视角，对全部交付物进行四维审查，并输出格式化审查报告。
+
+**四维审查维度**：
+
+**维度 A：需求回溯（Checklist Backtracking）**
+- 将第一步 Checklist 中的**每一条** Given-When-Then，与代码中的对应实现逐一比对。
+- 判定每一条状态：`✅ 已实现` / `⚠️ 部分实现` / `❌ 未实现`。
+- 对于 `⚠️` 或 `❌` 的条目，必须给出**具体缺失了什么**（如："缺少 When 条件中的 X 过滤逻辑"）。
+
+**维度 B：API 契约合规（API Contract Compliance）**
+- 将第四步 API 文档中的每个端点，与 Controller 代码逐一比对。
+- 检查项：URL 路径、HTTP Method、请求参数（类型/必填/校验注解）、响应结构（字段名/类型）。
+- 发现不一致时标记为 `🔴 Contract Breach` 并说明偏差。
+
+**维度 C：测试覆盖审计（Test Coverage Audit）**
+- 将第五步测试矩阵中的每条分支（正向/边界/异常），与第七步的单测代码逐一比对。
+- 标记缺失的测试分支，判定 `✅ 已覆盖` / `⚠️ 边界缺失` / `❌ 分支缺失`。
+
+**维度 D：代码质量扫描（Code Quality Scan）**
+- **未捕获异常**：是否存在 `throws Exception` 或空 `catch` 块。
+- **魔法值**：是否存在硬编码的字面常量（如数字 `3`、字符串 `"active"`）应抽取为常量或枚举。
+- **安全风险**：是否存在 SQL 拼接、未鉴权的接口、敏感数据明文传输。
+- **事务完整性**：跨表写操作是否标注 `@Transactional`。
+
+**AI 提示词关键约束**：
+- 审查必须**逐条、逐端点、逐分支**进行，不得笼统概括。
+- 每条发现必须附带**精确的文件行号**（如 `ShareController.java:42`）。
+- 禁止在未产生实际缺陷时凭空编造问题。
+
+**产出物**：`docs/develop/{git版本}-{需求title}-{需求id}/AI Review报告.md`，包含：
+
+```markdown
+# AI Review 报告
+
+## 📋 审查概要
+- 总 Checklist 条目数：X
+- ✅ 完全实现：X | ⚠️ 部分实现：X | ❌ 未实现：X
+- 🔴 API 契约违规：X
+- ❌ 缺失测试分支：X
+- 🐛 代码质量缺陷：X
+- 整体评估：✅ PASS / ⚠️ CONDITIONAL PASS / ❌ FAIL
+
+## A. 需求回溯表
+| # | Checklist 条目 | 状态 | 实现位置 | 缺失说明 |
+|---|---------------|------|---------|---------|
+| 1 | SHARE - 资产详情页分享入口 | ✅ | ShareController.java:25 | - |
+| 2 | SHARE - 详情页审核状态展示 | ⚠️ | AssetServiceImpl.java:88 | 仅实现了 Approve/Deny 状态，未处理 Processing 状态的轮询展示 |
+| 3 | ... | ❌ | - | 整个条目未实现 |
+
+## B. API 契约违规
+| 端点 | 预期 (API 文档) | 实际 (代码) | 严重程度 |
+|------|----------------|------------|---------|
+| GET /api/shares | 参数 pageSize=10 | 参数 pageSize 未设默认值 | Minor |
+| POST /api/shares | 响应含 shareUrl 字段 | 响应中字段名为 url | 🔴 Critical |
+
+## C. 测试覆盖审计
+| Checklist 条目 | 正向流程 | 边界值 | 异常流 |
+|---------------|---------|-------|-------|
+| 1 - 分享入口 | ✅ | ❌ 未测试空素材列表 | ❌ 未测试无权限用户 |
+| 2 - 审核状态 | ✅ | ✅ | ✅ |
+
+## D. 代码质量缺陷
+| 文件 | 行号 | 缺陷类型 | 建议 |
+|------|------|---------|------|
+| ShareController.java | 42 | 魔法值 | 将硬编码的 "active" 抽取为常量 STATUS_ACTIVE |
+| AssetService.java | 15 | 事务缺失 | saveShareAndUpdateStatus() 方法缺少 @Transactional |
+
+## E. 审查结论
+**评估**：⚠️ CONDITIONAL PASS
+**必须修复**：API 契约违规中的 🔴 Critical 项、缺失的 2 个测试分支
+**建议修复**：3 处魔法值
+**审批**：请在修复后重新审查，或由人工审批跳过 minor 项。
+```
+
+**审查终止条件**：
+- 若审查结果为 `✅ PASS`，则整个流程结束，交付完成。
+- 若审查结果为 `⚠️ CONDITIONAL PASS`，标记必须修复和可选修复项，AI 自动修复后重新执行第八步。
+- 若审查结果为 `❌ FAIL`，AI 自动修复所有缺陷后重新执行第八步。
+- **循环限制**：重新审查最多 2 轮。若第 2 轮审查仍为 FAIL，则**停止自动修复**，输出完整缺陷清单请求人工介入。
+
+**完成后（人工 Review 门控）**：将 AI Review 报告落盘到 docs 目录，向用户汇报审查结论，并**暂停**请求人工审批最终交付物；用户确认后整个流程正式结束。
+
+---
+
 ## 项目上下文适配（针对本仓库）
 
 本仓库为 Spring Boot 微服务架构项目（见 `AGENTS.md`），主要模块：
@@ -257,3 +354,5 @@ docs/develop/feature-share-audit-CP-48771/
 - [ ] 是否已向用户汇报产出物路径并**暂停等待人工 review 确认**（未获确认不进入下一步）？
 - [ ] 第六步是否做到了"逐条 Checklist 编码"且**未编写单测**（单测留到第七步 7.1）？
 - [ ] 第七步是否在所有业务代码完成后才统一编写单测，并在 7.2 编译自愈？
+- [ ] 第八步是否已执行四维审查，逐条回溯 Checklist，并输出《AI Review 报告》？
+- [ ] 第八步审查结论是否为 ✅ PASS 或 ⚠️ CONDITIONAL PASS（且必须修复项已修复）？
