@@ -41,6 +41,7 @@ python scripts/distribute.py --skill pacvue-common-utils --skill creativehub-int
 | `--home DIR` | 搜索根目录，默认用户目录 |
 | `--exclude GLOB` | 额外排除的目标目录 glob，可多次 |
 | `--include-repos` | 连 `IdeaProjects/` 下各仓库内的 skill 副本一起更新（见下方红线） |
+| `--include-skills-repo` | 连 `IdeaProjects/skills` 这个 skills 仓库一起更新（只放开这一个；`skills - Copy` 等备份仍排除） |
 
 ## 目标是怎么选出来的（别手工拷）
 
@@ -56,7 +57,7 @@ python scripts/distribute.py --skill pacvue-common-utils --skill creativehub-int
 | 排除项 | 为什么 |
 |---|---|
 | 源目录本身 | 自己拷自己 |
-| `IdeaProjects/skills*` | 用户的独立副本 / 备份。**备份被自动覆盖就不再是备份** |
+| `IdeaProjects/skills*` | 用户的独立副本 / 备份。**备份被自动覆盖就不再是备份**。唯一例外是 `IdeaProjects/skills` 本仓库，需显式 `--include-skills-repo` |
 | `IdeaProjects/` 下各仓库内的 `.claude/skills` | 它们**随仓库提交**，同步 = 产生 git 改动。要不要同步是逐仓决定的事，需要时用户同意后加 `--include-repos` |
 | `ai.opencode.desktop` | 只有旧版、从未参与分发，未经用户确认不覆盖 |
 
