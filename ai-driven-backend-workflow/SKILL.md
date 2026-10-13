@@ -1,358 +1,174 @@
 ---
 name: "ai-driven-backend-workflow"
-description: "8-step backend dev workflow (Checklist→Plan→DDL→API→TestMatrix→Coding→Test+Debug→AIReview), per-step human review gating, unit tests written after all business code, docs in docs/develop/{branch}-{title}-{id}/. Invoke when developing backend features or user mentions PRD/需求/BDD/TDD."
+description: "13-step backend dev workflow (Q&A→SPEC→Checklist→Plan→DDL→API→TestMatrix→Tasks→Coding→Test+Debug+BrowserVerify→AIReview→GlobalConsistency→AC-SubtaskHandover), per-step human review gating, unit tests written after all business code, optional AI-driven browser verification with XHR capture, docs auto-created from a Jira key in docs/develop/{sprint}-{id}-{title}/, every Step1 question offers a 需要跟产品经理确认 option and ends with a PM-pending list. Spec uses OpenSpec proposal template; tasks.md uses OpenSpec tasks template. Invoke when developing backend features or user mentions PRD/需求/BDD/TDD."
 ---
 
-# AI 驱动型后端开发全流程操作手册（AI-Driven Backend Workflow）
+# AI 驱动型后端开发全流程
 
-这是一套为 AI 量身定制的"AI 驱动型后端开发"完整操作手册。整个流程**环环相扣，前一步的输出作为后一步的输入**，确保 AI 不迷路、不瞎编。
+> **本 SKILL.md 是精简索引**：每步完整明细在 `references/step-NN-*.md`。执行到某步前先 Read 对应 reference 文件。
 
 ## 核心原则（CRITICAL）
 
-1. **顺序不可跳跃**：必须严格按 第一步 → 第八步 的顺序执行，每一步的产出物是下一步的强制输入。
-2. **每步独立完成 + 人工 Review 门控**：每一步单独完成，完成后**必须暂停**，向用户汇报产出物路径并**显式请求人工 review 确认**；未获人工 review 通过前，**禁止进入下一步**。
-3. **不一次性写完所有代码**：第六步是核心防错机制，必须拿着第一步的 Checklist **一条一条**喂给 AI，逐个击破。
-4. **每步产出物必须落地为文档**：Checklist.md、技术设计与实现方案文档.md、ddl.sql、API接口定义文档.md、单元测试验证指标矩阵.md，禁止只在对话中口头产出。
-5. **统一文档输出目录**：所有产出文档统一放在 `docs/develop/{git版本}-{需求title}-{需求id}/` 目录下（详见"文档输出目录规范"章节）。
-6. **测试代码延后编写**：BDD Checklist（第一步）与测试矩阵（第五步）在编码前制定；但**单元测试代码统一在所有业务代码完成后（第七步 7.1）再编写**，第六步禁止写单测。
-7. **最后统一调试**：编译、运行单测与自愈放在最后（第七步 7.2）统一做，不要边写边调。
-8. **第八步为最终质量门禁**：编译通过 + 单测全部 Pass ≠ 需求全部实现。必须执行第八步 AI Review，逐条回溯 Checklist，确保交付物与需求零偏差后方可交付。
+> 14 条，每条一句话。**细则在 `references/` 对应文件里**，别在这儿找完整规则 ——
+> 这里只负责"让你想起来有这么回事"，想不起来的规则等于不存在。
 
-## 触发条件（When to Invoke）
+| # | 原则 | 细则在哪 |
+|---|---|---|
+| 1 | **先分流再执行** — Step1 先判变更类型（A 新功能走全 13 步 / B 增强可跳 Step5 / C Bugfix 走精简路径），经用户确认后写入 Spec。分流**只降流程密度、不降质量门**；判不准按高一档走 | `step-01` §0 |
+| 2 | **顺序不可跳跃 + 门控分两档** — 上一步产出物是下一步的强制输入；🔴 **阻塞门控**（拦不可逆/对外的事）必须暂停等确认，🟡 **通知式门控**汇报后直接继续、有异议再回退 | 见下「门控档位」 |
+| 3 | **零臆测** — 事实性判断必须三选一：就地取证（标 `证据：file:line`）/ 文档取证 / 问用户。禁止「通常、应该是、按惯例」，禁止从命名推断语义 | `step-01` §零臆测 |
+| 4 | **影响面反查 + 全局落点** — 每次改动先问「还有哪些地方是同一件事」并 Grep 求证；同类点 ≥2 处上提共享层，=1 处就地改，**禁止就地打补丁** | `step-01` §影响面、`step-04` |
+| 5 | **回归优先于新增** — 流程默认只验"新需求做对了"。Step7 强制产出《回归验证清单》（`R-NN`），未验证的 `R-NN` 与未实现的 AC 同等对待 | `step-07`、`step-04` |
+| 6 | **改既有接口 = 破坏性变更** — Step6 必须出「既有端点变更」表，🔴 项**必须显式问用户**选方案，禁止 AI 自行决定 | `step-06` |
+| 7 | **复用优先 + 非功能全程追溯** — Step4 复用清单与非功能映射表逐条落地到 DDL/代码/API，禁止停留在"需考虑" | `step-04` |
+| 8 | **产出物必须落地 + 统一目录** — 禁止仅对话产出；全部进 `docs/develop/{Sprint}-{id}-{title}/`（按 Jira 号自动建，见 `doc-output` §启动） | `doc-output-and-context.md` |
+| 9 | **AC 编号即追溯主键** — `AC-NN` 全局连续、零填充两位、宽度统一；Step7/8/10/11/12 一律按它引用与反查，任一处缺席判漏实现 | `step-03` 核心约束 4 |
+| 10 | **测试延后 + 逐条编码** — Step8 拆任务 → Step9 一条条喂；后端单测在业务代码全部完成后（Step10.1）统一写，调用方按 Step6 契约对接 | `step-08`、`step-09`、`step-10` |
+| 11 | **测试全 Pass ≠ 需求实现** — Step10.3 强制业务逻辑自检；Step10.2 **根因优先，禁止改测试绕过**（禁放宽/删断言、禁 `@Disabled`） | `step-10` §10.2/10.3 |
+| 12 | **验证必须留硬证据** — 证据按 `AC-NN` 归档（`case.md` + `script/`或`REPLAY.md` + `evidence/` + `RESULT.md`），**能录像就别截图，能截图就别只写字**，**截图证据一定要标注**（框住判定点 + 框边写文字说明，未标注的截图不算证据，规则见 `browser-verification-playbook.md` §4.1），随走随落禁止事后补证；**没留证的 AC 视为未测** | `doc-output` §一 |
+| 13 | **数据核对：接口返回对 ≠ 数据对** — AC 含具体数值/条数/聚合结果时，Step10.5 必须用只读 SQL 对账；全程禁写操作，**禁止改 SQL 让它对上** | `step-10` §10.5 |
+| 14 | **禁止中途提交 + 交付前双重门禁 + 提测终态** — Step9/10/11 全程禁 `git add/commit`；必须 Step11 AI Review + Step12 全局一致性审查（含独立证据验收）PASS 且人工审批后才提交并产出《测试交接文档》；Step13 提测状态（与验证态分离）须落到终态 `已提测` 或 `无需提测` | `step-11`、`step-12`、`step-13`、`test-handover.md` |
 
-当出现以下任一情况时，应启动本工作流：
-- 用户提到"后端开发 / backend development / 新功能开发 / 实现需求"
-- 用户提供了 PRD 文本、UI 界面截图、业务背景描述，要求开发
-- 用户提及 "BDD / TDD / Checklist / 需求拆解 / 接口设计 / DDL 设计"
-- 用户要求按规范流程开发一个完整的后端业务模块
-- 用户明确说"按 AI 驱动型后端流程"或"按八步流程"
+**门控档位**（编码前只剩 3 道阻塞门，其余降级为通知式）：
+
+| 档 | 在哪几步 | 怎么走 | 为什么是这档 |
+|---|---|---|---|
+| 🔴 **阻塞** | **③ Spec+Checklist**（合并确认）、**⑤ DDL**、**⑥ API 契约**、**⑩.3 业务逻辑自检**、**⑪ AI Review**、**⑫ 提交**、**⑬ 是否提测**，以及贯穿全程的**写操作授权** | 汇报 → **暂停等用户明确确认** → 才继续 | 拦的是**不可逆**（DDL 手工执行、git 提交、写 Jira、写数据）或**对外承诺**（API 契约、进了 Jira 的 AC）或**范围错了全白做**的事 |
+| 🟡 **通知式** | ② Spec、④ 技术方案、⑦ 测试矩阵、⑧ tasks、⑨ 编码、⑩.1 单测 | 落盘 → 跑 `validate_step.py`（FAIL 必须修到通过）→ 一句话汇报 → **直接继续** | 产出物是文档/代码，**改起来几分钟且未产生不可逆后果**；用户随时可提异议，收到异议**回退重做本步及其下游** |
+
+🔴 **降级的是"等人点头"，不是"不检查"**：`validate_step.py` 每步照跑，FAIL 等同本步未完成。
+这么分的理由：人被要求连续点 9 次「通过」，第 5 次之后就不看了 —— 门控不是变慢，是**静默失效**，
+而且比没有门控更糟（给了虚假的安全感）。把注意力省给真正拦不可逆事项的那几道门（同 L18 的道理）。
+
+**三条贯穿全程的红线**（不分步骤，任何时候都适用）：
+
+- 🔴 **浏览器实机验证（Step10.4，可选）**：AI 必须主动询问、用户明确同意才执行；禁生产环境、禁 AI 代输凭据；**「给了可用账号」≠「写操作被授权」**，每一次写都要单独问 → `step-10` §10.4
+- 🔴 **变更影响重评估**：修复若触发跨层改动 / 范围扩散 / 非功能回归 / 架构突破，强制回退对应步骤重审 → `step-11`
+- 🔴 **机器验收优先于口头确认**：每步产出后跑 `validate_step.py`，**FAIL = 本步未完成**，与人工 Review 同等效力 → 见下文「配套脚本」
+
+**另有两条机制**：经验教训对照（每步前查 `lessons-learned.md`，Step11/12 做合规检查）；来源冲突裁决（用户最新指令 > 截图/设计稿 > PRD > 本地技术文档 > 代码现状，**代码现状不自动等于需求**）。
+
+## 触发条件
+用户提及 "后端开发/backend/新功能/实现需求/BDD/TDD/Checklist/接口设计/DDL 设计"、提供 PRD/UI/业务背景，或要求按"十三步流程"开发。
 
 ## 工作流总览
+| 步骤 | 名称 | 输入 | 产出物 | 明细 |
+|------|------|------|--------|------|
+| 1 | 需求澄清 Q&A（每题带「需要跟产品经理确认」选项） | Jira 号 + PRD/UI/业务背景 | Step 1-需求澄清问答记录.md（含待 PM 确认清单） | `step-01-requirements-qa.md` |
+| 2 | Spec(OpenSpec proposal) | Q&A+PRD/UI | Step 2-Spec.md | `step-02-spec.md` |
+| 3 | 结构化 Checklist（前端操作流、按测试顺序、AC-NN 全局编号、COMMON/入口前缀、可选代码 gap-check 与 Jira 同步） | Spec | Step 3-Checklist.md(BDD) + Step 3-Checklist-Jira.txt(可拷贝纯净版) | `step-03-checklist.md` |
+| 4 | 技术方案(含复用清单+非功能映射) | Checklist+技术栈 | Step 4-技术设计与实现方案文档.md | `step-04-plan.md` |
+| 5 | DDL(承接非功能索引/乐观锁落点) | Checklist+计划+已有表 | Step 5-ddl.sql | `step-05-ddl.md` |
+| 6 | API 设计(含限流/幂等/缓存/权限) | Checklist+DDL+RESTful | Step 6-API接口定义文档.md | `step-06-api.md` |
+| 7 | 测试用例矩阵 + **回归验证清单 `R-NN`** | Checklist+API 文档+Step4 回归候选 | Step 7-单元测试验证指标矩阵.md + **Step 7-回归验证清单.md** | `step-07-test-matrix.md` |
+| 8 | 任务拆解(P0/P1/P2+估时) | Step1~7 全部产出 | Step 8-tasks.md | `step-08-tasks.md` |
+| 9 | 逐条编码(复用+非功能落点,禁单测,禁git提交) | tasks.md | 生产代码 | `step-09-coding.md` |
+| 10 | 单测+编译自愈+逻辑自检+浏览器实机验证(可选,10.3后询问,AI 开浏览器+抓 XHR)+**数据核对(只读 SQL 对账)**+**测试证据按 AC 归档**(禁git提交) | 业务代码+测试矩阵+API文档+日志 | 全Pass单测+Step 10-自检报告+(可选)Step 10-浏览器验证步骤+实机验证报告+**tests/AC-NN/{case.md, script/ 或 REPLAY.md, evidence/, RESULT.md}+tests/README.md+tests/.verify-state.json（用例状态/窗口登记）+验证进度看板.html（+外层 docs/develop/index.html）** | `step-10-test-debug.md` |
+| 11 | AI Review(禁git提交) | Step3/6/7文档+Step9/10代码 | Step 11-AI Review报告 | `step-11-ai-review.md` |
+| 12 | 全局一致性审查 + 交付收尾(**唯一允许 git 提交**) | Steps1~11全部产出物 | Step 12-全局一致性审查报告 + **Step 12-证据验收报告**（独立 subagent）+ **Step 12-测试交接文档** + 提交 | `step-12-global-consistency-review.md`、`evidence-acceptance.md`、`test-handover.md` |
+| 13 | **AC ↔ Subtask 匹配与提测**（与验证态分离） | Checklist 全量 AC + 父票 Sub-task | `Step 13-AC-Subtask映射.md` + `.handover-state.json`（终态：`已提测` / `无需提测`）；确认提测则 Jira→Testing 并转交 `biao.mu@pacvue.com` | `step-13-ac-subtask-handover.md` |
 
-| 步骤 | 名称 | 输入 | 产出物 |
-|------|------|------|--------|
-| 1 | 需求对齐与 Checklist 生成 | PRD/UI/业务背景 | Checklist.md（BDD 格式） |
-| 2 | 技术方案与实现计划 | Checklist + 技术栈 | 技术设计与实现方案文档.md |
-| 3 | 数据库设计与 DDL | Checklist + 实现计划 + 已有表 | 数据库变更 SQL 脚本 |
-| 4 | 接口文档设计 | Checklist + DDL + RESTful 规范 | 前后端 API 接口定义文档.md |
-| 5 | 测试用例矩阵制定 | Checklist + API 文档 | 单元测试验证指标矩阵.md |
-| 6 | 逐条编码（仅业务代码，禁止写单测） | 1~5 步全部产出物 | 生产代码（Controller/Service/Mapper/DTO） |
-| 7 | 编写单测 + 编译自愈 | 第 6 步全部业务代码 + 第 5 步测试矩阵 + 报错日志 | 全部 Pass 的单测 + 编译通过的模块 |
-| 8 | AI Review —— 需求回溯与代码合规审查 | 第 1 步 Checklist + 第 4 步 API 文档 + 第 5 步测试矩阵 + 第 6/7 步全部代码 | AI Review 报告（Checklist回溯表 + API契约检查 + 代码质量评分 + 缺陷清单） |
+## 其他 reference
+- `doc-output-and-context.md` — 目录规范 + 项目上下文 + 自检清单。**Step1 前必读**。
+- `openspec-integration.md` — OpenSpec 步骤映射、已搬入模板及原因。
+- `lessons-learned.md` — 经验教训库，每步前对照相关 lesson。
+- `lesson-harvest.md` — **经验沉淀**：四道准入（代价闸 / 抹名测试 / 落点选择 / 动作化）+ 查重并入 + 容量淘汰 + 提名门控。默认结论是「本次无新增经验」；落点由「执行时 AI 正在读哪个文件」决定，不是一律进 lessons 库。**Step13 提测终态之后**必读。
+- `data-reconciliation.md` — **数据核对**（只读 SQL 取证）：只读门禁、可用连接、绩效查询硬约束、SQL 必须从既有 mapper 推导、口径对齐、取证落盘、对不上怎么逐层二分。**只在 AC 的预期含具体数值/条数/聚合结果时才需要读**。
+- `test-handover.md` — **提测交接文档**的必含项、禁止透传项与模板。Step12 必读。
+- `step-13-ac-subtask-handover.md` — **AC↔Subtask 匹配与提测**：独立提测状态（`待匹配`/`已匹配待确认`/`已提测`/`无需提测`）、匹配规则、确认后门控、Jira Testing + 转交。Step13 必读。
+- `browser-verification-playbook.md` — **浏览器实机验证**：只读红线、**动手前必读脚本分层**（CDP `SCRIPTS.md` 全局层 → `projects/<项目>` 页面层脚本 + `PAGE-NOTES.md`；禁止现写探针）、工具选型与 CDP、未登录交接、驱动 UI 的高频坑、截图标注、走读证据、权限类验收、找账号、提速、多会话并行。实机验证前必读；收尾按层回写（坑→SCRIPTS，页面操作→projects/笔记）。
+- `evidence-acceptance.md` — **证据验收**：独立 subagent 以验收测试专员身份盲审 + 对账，逐 AC 判定证据能不能通过验收（验收通过 / 验收不通过）。Step12 必读。
+- `bug-hunting-checklist.md` — **缺陷猎捕清单**（输入边界/空值/并发/事务/SQL/权限/回归面…）。Step11 维度 E「缺陷猎捕」必读；它问的是「什么输入下会错」，不是「符不符合文档」。
 
----
+## 自进化机制
+Step13 提测终态落定后做**经验沉淀**：四道准入（代价闸 → 抹名测试 → 落点选择 → 动作化）+ 查重并入 → **只产出提名表，用户确认后才写入**（强制门控）。默认结论是「本次无新增经验」。落点不限于 `lessons-learned.md`：浏览器手法进 playbook、检查项进猎捕清单、某步做法进该步文件、项目级事实进仓库 `AGENTS.md`。详见 `references/lesson-harvest.md`。
 
-## 文档输出目录规范（CRITICAL）
+## 配套脚本（机器验收，不靠人眼）
 
-所有第一~第五步的产出文档（Checklist / 技术设计 / DDL / API / 测试矩阵）**必须**统一放在：
+原流程每步的出口是「汇报路径 → 暂停 → 人确认」，**人眼是唯一验收器** —— 模型说「我检查过了」
+和真检查过没法区分。`scripts/` 下两个脚本把文档里已写死的规则变成可执行断言：
 
-```
-docs/develop/{git版本}-{需求title}-{需求id}/
-```
+| 脚本 | 何时跑 | 作用 |
+|---|---|---|
+| `scripts/preflight.py` | **Step1 之前，必跑** | 环境体检：JDK17 / maven / node / 仓库状态 / docs 可写 / 数据库连通。有 BLOCK 项退出码 1，**必须先修再开工** |
+| `scripts/init_workdir.py` | **Step1 之前，拿到 Jira 号后** | 按 `{Sprint}-{票号}-{标题}` 在后端仓 `docs/develop/` 建需求目录；同票号已有目录则复用，多个则退出码 2 问用户；末行输出 `DIR=<路径>` |
+| `scripts/qa_record.py` | **Step1 全程；之后每步开始前跑 `changes`** | Step1 问答记录（一个问题一节）的解析 / 写回 / 质量检查（缺问题描述 FAIL）/ 待 PM 清单导出（md、csv）/ 产品确认分享令牌（`.pm-share.json`）；看板上的改动登记在 `.qa-changes.json`，`changes` 列出改前改后（退出码 3 = 有待确认），用户确认并同步下游后 `ack`，不认可 `reject` 恢复 |
+| `scripts/checklist_jira.py` | **Step3 每次改 Checklist 后** | 从 Checklist 机械生成 Jira 纯净版（去掉「图示」行与来源括注，按 `[Story号]` 拆分），不再手工复制 |
+| `scripts/annotate.js` | **Step3 出标注截图时** | 注入原型 / 测试页面后 `window.__ann(...)` 画红框 + 编号 + 说明 + 连线，说明下自动加「对应 AC」；配合 Playwright 截图存到需求目录 `UI/`（做法见 step-03「标注截图怎么做」） |
+| `scripts/validate_step.py` | **每步产出后，Review 之前** | 产出物存在且非空、`AC-NN` 全局唯一、矩阵覆盖每条 AC、tasks 绑定 AC、每 AC 有证据目录与复跑入口、回归项有结论、交付前无 `[open]`、技术设计有证据标注且无「通常/应该是/按惯例」这类未取证措辞、**代码改了但对应文档没改**、**矩阵无模糊预期/无折叠省略/分支均标优先级**（Step11/12） |
+| `scripts/verify_state.py` | **10.4 并行验证时，认领 / 收尾每条 AC** | 用例状态登记（待验证/验证中/修复中/通过/失败/…）+ 会话与窗口标识归属；锁文件保证多会话不抢同一条 AC，超时的「验证中」可 reclaim |
+| `scripts/verify_dashboard.py` | **10.4 每条 AC 收尾后 / 10.4.3 收尾** | 生成《验证进度看板.html》（单需求：整体进度+用例状态+证据+耗时，轮询 `tests/.verify-state.json` 实时刷新）与外层 `docs/develop/index.html`（所有进行中需求总览，排除 archived/tools，可切换）；`--serve` 起本地服务 ；**`--serve` 模式**：内容随磁盘实时更新（每次请求现场解析）、「需求问答」页签可编辑保存、需求列表可**归档**（标记已完成 → 移到 `archived/`，「已归档」入口可查看 / 恢复）；`validate_step.py --record` 会顺带重建看板 |
+| `scripts/handover_match.py` | **Step13** | AC↔Subtask 匹配：读 Checklist + Jira Sub-task JSON → 写出映射 md/json；`--apply` 写入 `.handover-state.json`（`已匹配待确认`） |
+| `scripts/handover_state.py` | **Step13** | 提测状态（与验证态分离）：`待匹配`→`已匹配待确认`→终态`已提测`/`无需提测`；映射与 Jira 动作记录写 `.handover-state.json` |
 
-**目录段说明**：
-- `git版本`：当前 git 分支名。用 `git rev-parse --abbrev-ref HEAD` 获取；若分支名含 `/`（如 `feature/xxx`），将 `/` 替换为 `-`。
-- `需求title`：需求标题（来自 PRD 或用户提供），中英文均可，需去除空格和文件系统非法字符（`/ \ : * ? " < > |`）。
-- `需求id`：需求 ID（如 `CP-48771`、`JIRA-123`），来自 PRD 或用户提供。
+**文档同步检查**（Step11 / Step12 自动跑）：规则早就写在项目 `AGENTS.md` 里
+（「REST API 变更必须同步 OpenAPI 注解与 `docs/creative-management-api.md`」），
+但一直没有检查，做没做没人知道。现在按改动路径自动判：
 
-**目录结构示例**：
-```
-docs/develop/feature-share-audit-CP-48771/
-├── Checklist.md
-├── 技术设计与实现方案文档.md
-├── ddl.sql
-├── API接口定义文档.md
-├── 单元测试验证指标矩阵.md
-└── UI/                       # UI 图存放目录（如存在）
-    ├── asset-detail.png
-    └── share-dialog.png
-```
+| 改了什么 | 必须同步 | 严重度 |
+|---|---|---|
+| `**/controller/**`、`*Req/Resp/View/VO/DTO.java` | `docs/creative-management-api.md` | 🔴 FAIL |
+| `**/mapper/**`、`*Mapper.java`、`db/*.sql` | `docs/creative-management-data.md` | ⚠️ WARN |
+| `**/manager/**`、`**/handler/**`、`**/consumers/**` | `docs/creative-management-architecture.md` | ⚠️ WARN |
 
-**UI 图存放规范**：
-- UI 界面截图（如果存在）统一放在 `docs/develop/{git版本}-{需求title}-{需求id}/UI/` 子目录下。
-- 若用户在第一步提供了 UI 图，AI 应引导/确认其存放至该 `UI/` 目录，并在 Checklist.md 中以相对路径引用（如 `![](UI/asset-detail.png)`）。
-- 若用户未提供 UI 图，则不创建该子目录，相关步骤按"无 UI 图"处理。
+默认只看**工作区未提交改动**（流程禁止 Step12 前提交，通常够用）；需要并上分支已提交
+部分时加 `--base origin/production`。仓根默认从 `--dir` 上溯三层，可用 `--project` 覆盖。
 
-**执行要求**：
-- 第一步开始前，AI 必须先确定 `git版本`、`需求title`、`需求id` 三项；若用户未提供 title/id，必须用 `AskUserQuestion` 询问。
-- 目录不存在时自动创建。**注意 Windows 兼容**：本项目运行在 Windows，用 PowerShell `New-Item -ItemType Directory -Force` 创建（不要用 `mkdir -p`，PowerShell 不支持 `-p` 参数）。
-- 第六步的业务代码、第七步的单测代码按项目既有源码目录结构放置（如 `micro-api/src/...`），**不**放进 docs 目录；只有设计类文档与 UI 图放进上述 docs 目录。
-
----
-
-## 第一步：需求对齐与结构化 Checklist 生成
-
-**输入**：PRD 文本、UI 界面截图、当前系统已有的业务背景描述。
-
-**执行动作**：将模糊的人类需求，翻译成高严谨性的 BDD（行为驱动开发）测试用例。
-
-**AI 提示词关键约束**：
-- 必须使用 `* [open] 模块 - 场景描述` 作为标题。
-- 必须严格使用 **Given-When-Then** 格式。
-- 每个 Checklist 粒度要小，必须是**可独立交付、可独立测试的最小业务单元**。
-
-**产出物**：`docs/develop/{git版本}-{需求title}-{需求id}/Checklist.md` 文档（markdown 格式）。
-
-**完成后（人工 Review 门控）**：将 Checklist 落盘到上述目录，向用户汇报路径，并**暂停**请求人工 review；用户确认通过后才进入第二步。
-
-**格式范例**：
-
-```checklist
-* [open] SHARE - 资产详情页分享入口（Image/Video/Logo）
->> Given: 用户位于 Creative Hub -> Asset 页面，查看单个素材详情。
->> When: 用户点击素材旁边的 "Share Asset" 交互按钮。
->> Then: 页面跳转至 Share 页面，并自动弹出素材分享创建弹窗，且该素材已被预选。
-
-* [open] SHARE - Asset Detail 页面展示最后一次审核状态
->> Given: 用户位于 Creative Hub -> Asset 页面，查看某个素材的详情，且该素材在任意分享链接中至少存在一条审核记录。
->> When: 页面加载完成。
->> Then: Asset Detail 页面清晰展示该素材的最后一次审核状态（如 Approved、Denied、Processing），其状态与该素材所有分享审核历史中时间最新的那条记录一致。
+```bash
+python scripts/preflight.py --project .
+python scripts/validate_step.py --dir docs/develop/{...} --workflow backend --step 3 --record
+python scripts/validate_step.py --dir docs/develop/{...} --workflow backend --status
+python scripts/validate_step.py --self-check                        # 只校验 skill 自身（改完 skill 跑一次）
 ```
 
----
-
-## 第二步：开发实现计划与技术方案评估（Plan）
-
-**输入**：第一步的 Checklist + 当前系统的技术栈架构说明（如 Spring Boot + MyBatis-Plus，或 Node.js + NestJS）。
-
-**执行动作**：评估技术可行性，梳理业务逻辑的实现步骤。
-
-**AI 提示词关键约束**：
-- **影响面评估**：必须列出这批需求会改动哪些现有模块、公共方法或已有表。
-- **技术盲区提示**：必须识别潜在的技术风险（如并发、大数据量、三方 API 超时风险）。
-
-**产出物**：`docs/develop/{git版本}-{需求title}-{需求id}/技术设计与实现方案文档.md`，必须包含：
-1. 改动点清单（涉及的模块/类/方法/表）
-2. 核心业务伪代码逻辑
-3. 潜在风险提示
-
-**完成后（人工 Review 门控）**：将文档落盘到上述目录，向用户汇报路径，并**暂停**请求人工 review；用户确认通过后才进入第三步。
-
----
-
-## 第三步：数据库设计与 SQL DDL 生成（Data Model）
-
-**输入**：第一步的 Checklist + 第二步的实现计划 + 已有的相关表结构（如有）。
-
-**执行动作**：设计满足业务的数据模型，并生成标准的数据库建表或改表 SQL。
-
-**AI 提示词关键约束**：
-- **强制指定规范**：指定数据库（如 MySQL 8.0）和命名规范（如 snake_case 下划线命名）。
-- **生产环境必备字段**：每张表必须包含 `id`（主键）、`create_time`、`update_time`、`is_deleted`（逻辑删除）、`version`（乐观锁）。
-- **索引优化**：根据 Checklist 中的查询条件（如 `Given: 用户在某个 Group...`），自动在相应字段（如 `group_id`）上创建单列索引或联合索引。
-
-**产出物**：`docs/develop/{git版本}-{需求title}-{需求id}/ddl.sql`，含高质量注释、索引设置。
-
-**完成后（人工 Review 门控）**：将 SQL 脚本落盘到上述目录，向用户汇报路径，并**暂停**请求人工 review；用户确认通过后才进入第四步。
-
----
-
-## 第四步：接口文档设计（API Design）
-
-**输入**：第一步的 Checklist + 第三步的 DDL 表结构 + 团队的接口标准（如 RESTful 规范）。
-
-**执行动作**：设计前后端交互的契约，确定每一个 HTTP 请求的细节。
-
-**AI 提示词关键约束**：
-- 格式必须为标准的 Markdown 或 Swagger/OpenAPI 格式。
-- 必须清晰标明每个字段的**类型、是否必填、含义**。
-- **状态码规范**：不仅要有成功响应，还必须定义好业务异常时的错误码（如 400 Bad Request 对应的业务错误原因）。
-
-**产出物**：`docs/develop/{git版本}-{需求title}-{需求id}/API接口定义文档.md`。
-
-**完成后（人工 Review 门控）**：将文档落盘到上述目录，向用户汇报路径，并**暂停**请求人工 review；用户确认通过后才进入第五步。
-
----
-
-## 第五步：测试用例矩阵与验证标准制定（Test Matrix）
-
-**输入**：第一步的 Checklist + 第四步的接口文档。
-
-**执行动作**：在写代码前，制定出严密的验证指标，作为后续编写单元测试的依据（TDD 测试驱动开发思想）。
-
-**AI 提示词关键约束**：
-- 每个 Checklist 条目必须拆解出**至少 3 个测试分支**：
-  1. 正向主流程
-  2. 边界值校验（如数量为 0、字符串超长）
-  3. 异常流阻断（如无权限、数据不存在）
-- 必须明确写出**断言（Assert）的预期结果**（如：返回状态码 404，且数据库无新增记录）。
-
-**产出物**：`docs/develop/{git版本}-{需求title}-{需求id}/单元测试验证指标矩阵.md`。
-
-**完成后（人工 Review 门控）**：将文档落盘到上述目录，向用户汇报路径，并**暂停**请求人工 review；用户确认通过后才进入第六步。
-
----
-
-## 第六步：逐条拆解、自动化编码（Coding Only）
-
-**输入**：上述 1~5 步的所有产出物 + 当前要开发的特定代码文件的上下文/模板。
-
-**执行动作**：【核心防错机制】**不要让 AI 一次性写完所有代码**。必须拿着第一步的 Checklist，**一条一条**喂给 AI，逐个击破。
-
-**AI 提示词关键约束**：
-- 编码提示词模板："现在请针对 Checklist 中的第 X 条，结合第 3 步的 DDL、第 4 步的接口定义和第 5 步的测试指标，编写业务代码（Controller/Service/Mapper）。"
-- **本步只写业务代码，禁止写单元测试**。单元测试统一在第七步 7.1 编写。
-
-**产出物**：符合业务逻辑的**生产代码**（Controller / Service / Mapper / DTO 等，按项目既有源码目录结构放置，如 `micro-api/src/...`）。
-
-**执行节奏**：
-1. 用户/AI 指定本轮要实现的 Checklist 条目编号。
-2. AI 输出该条目的业务代码（Controller/Service/Mapper）。
-3. 重复 1~2，直到所有 Checklist 条目的业务代码全部完成。
-4. **条目依赖处理**：若条目间存在依赖（如条目 B 依赖条目 A 产出的 Service/方法），必须**按依赖顺序**处理——先做被依赖的条目，再做依赖方；无法确定顺序时向用户确认。
-
-**完成后（人工 Review 门控）**：向用户汇报已实现的所有业务代码文件清单，并**暂停**请求人工 review；用户确认通过后才进入第七步。
-
----
-
-## 第七步：编写单元测试、编译与自主微调（Test & Debug & Self-Healing）
-
-> 注意：本步**统一放在最后**做。第六步只写业务代码，本步先统一编写单测，再编译运行+自愈。
-
-**输入**：第六步生成的全部业务代码 + 第五步的《单元测试验证指标矩阵.md》+ IDE 的编译错误信息 + 单测运行失败日志。
-
-**执行动作**（分两个子阶段，每个子阶段完成后均需人工 review 门控）：
-
-**7.1 统一编写单元测试**
-- 基于 第五步的《单元测试验证指标矩阵.md》，为第六步产出的**所有**业务代码统一编写单元测试。
-- 确保测试矩阵中每个 Checklist 条目的 3 个分支（正向 / 边界 / 异常）**100% 覆盖**。
-- Feign 接口按 `.agents/testing.md` 的 Mock 规范处理。
-- **单测代码放置位置**：按项目既有测试目录结构，Spring Boot 项目放在对应模块的 `src/test/java/...` 下，测试包路径与被测类包路径一致。
-- **完成后（人工 Review 门控）**：汇报单测文件清单，暂停请求人工 review；通过后才进入 7.2。
-
-**7.2 编译、运行单测与自愈**
-- 将代码放入真实开发环境编译并运行单测。
-- 如果报错，直接将报错日志甩给 AI，按下方提示词约束修复。
-- **自愈终止条件**：连续修复 3 轮仍未全部 Pass，则**停止自动修复**，向用户汇报当前错误清单与已尝试的修复方案，请求人工介入；不要无限循环重试。
-
-**AI 提示词关键约束**：
-- **不要直接问"为什么报错"**，而是使用提示词："这是刚才那段代码在运行单测时的报错日志 [贴入日志]。请分析是业务代码逻辑问题还是单测 Mock 问题，并给出修复后的完整代码。"
-
-**产出物**：
-- 全部 Pass 的单元测试代码
-- 完美编译通过的后端业务模块
-
----
-
-## 第八步：AI Review —— 需求回溯与代码合规审查（AI Review）
-
-> 本步是交付前的**最终质量门禁**。所有代码已通过编译和单测，但编译通过 ≠ 需求全部实现。必须拿第一步的 Checklist 逐条回溯比对，确保交付物与需求零偏差。
-
-**输入**：
-- 第一步的《Checklist.md》（需求行为标准）
-- 第四步的《API接口定义文档.md》（契约标准）
-- 第五步的《单元测试验证指标矩阵.md》（测试覆盖标准）
-- 第六步产出的全部业务代码
-- 第七步产出的全部单元测试代码
-
-**执行动作**：AI 以独立审查者视角，对全部交付物进行四维审查，并输出格式化审查报告。
-
-**四维审查维度**：
-
-**维度 A：需求回溯（Checklist Backtracking）**
-- 将第一步 Checklist 中的**每一条** Given-When-Then，与代码中的对应实现逐一比对。
-- 判定每一条状态：`✅ 已实现` / `⚠️ 部分实现` / `❌ 未实现`。
-- 对于 `⚠️` 或 `❌` 的条目，必须给出**具体缺失了什么**（如："缺少 When 条件中的 X 过滤逻辑"）。
-
-**维度 B：API 契约合规（API Contract Compliance）**
-- 将第四步 API 文档中的每个端点，与 Controller 代码逐一比对。
-- 检查项：URL 路径、HTTP Method、请求参数（类型/必填/校验注解）、响应结构（字段名/类型）。
-- 发现不一致时标记为 `🔴 Contract Breach` 并说明偏差。
-
-**维度 C：测试覆盖审计（Test Coverage Audit）**
-- 将第五步测试矩阵中的每条分支（正向/边界/异常），与第七步的单测代码逐一比对。
-- 标记缺失的测试分支，判定 `✅ 已覆盖` / `⚠️ 边界缺失` / `❌ 分支缺失`。
-
-**维度 D：代码质量扫描（Code Quality Scan）**
-- **未捕获异常**：是否存在 `throws Exception` 或空 `catch` 块。
-- **魔法值**：是否存在硬编码的字面常量（如数字 `3`、字符串 `"active"`）应抽取为常量或枚举。
-- **安全风险**：是否存在 SQL 拼接、未鉴权的接口、敏感数据明文传输。
-- **事务完整性**：跨表写操作是否标注 `@Transactional`。
-
-**AI 提示词关键约束**：
-- 审查必须**逐条、逐端点、逐分支**进行，不得笼统概括。
-- 每条发现必须附带**精确的文件行号**（如 `ShareController.java:42`）。
-- 禁止在未产生实际缺陷时凭空编造问题。
-
-**产出物**：`docs/develop/{git版本}-{需求title}-{需求id}/AI Review报告.md`，包含：
-
-```markdown
-# AI Review 报告
-
-## 📋 审查概要
-- 总 Checklist 条目数：X
-- ✅ 完全实现：X | ⚠️ 部分实现：X | ❌ 未实现：X
-- 🔴 API 契约违规：X
-- ❌ 缺失测试分支：X
-- 🐛 代码质量缺陷：X
-- 整体评估：✅ PASS / ⚠️ CONDITIONAL PASS / ❌ FAIL
-
-## A. 需求回溯表
-| # | Checklist 条目 | 状态 | 实现位置 | 缺失说明 |
-|---|---------------|------|---------|---------|
-| 1 | SHARE - 资产详情页分享入口 | ✅ | ShareController.java:25 | - |
-| 2 | SHARE - 详情页审核状态展示 | ⚠️ | AssetServiceImpl.java:88 | 仅实现了 Approve/Deny 状态，未处理 Processing 状态的轮询展示 |
-| 3 | ... | ❌ | - | 整个条目未实现 |
-
-## B. API 契约违规
-| 端点 | 预期 (API 文档) | 实际 (代码) | 严重程度 |
-|------|----------------|------------|---------|
-| GET /api/shares | 参数 pageSize=10 | 参数 pageSize 未设默认值 | Minor |
-| POST /api/shares | 响应含 shareUrl 字段 | 响应中字段名为 url | 🔴 Critical |
-
-## C. 测试覆盖审计
-| Checklist 条目 | 正向流程 | 边界值 | 异常流 |
-|---------------|---------|-------|-------|
-| 1 - 分享入口 | ✅ | ❌ 未测试空素材列表 | ❌ 未测试无权限用户 |
-| 2 - 审核状态 | ✅ | ✅ | ✅ |
-
-## D. 代码质量缺陷
-| 文件 | 行号 | 缺陷类型 | 建议 |
-|------|------|---------|------|
-| ShareController.java | 42 | 魔法值 | 将硬编码的 "active" 抽取为常量 STATUS_ACTIVE |
-| AssetService.java | 15 | 事务缺失 | saveShareAndUpdateStatus() 方法缺少 @Transactional |
-
-## E. 审查结论
-**评估**：⚠️ CONDITIONAL PASS
-**必须修复**：API 契约违规中的 🔴 Critical 项、缺失的 2 个测试分支
-**建议修复**：3 处魔法值
-**审批**：请在修复后重新审查，或由人工审批跳过 minor 项。
-```
-
-**审查终止条件**：
-- 若审查结果为 `✅ PASS`，则整个流程结束，交付完成。
-- 若审查结果为 `⚠️ CONDITIONAL PASS`，标记必须修复和可选修复项，AI 自动修复后重新执行第八步。
-- 若审查结果为 `❌ FAIL`，AI 自动修复所有缺陷后重新执行第八步。
-- **循环限制**：重新审查最多 2 轮。若第 2 轮审查仍为 FAIL，则**停止自动修复**，输出完整缺陷清单请求人工介入。
-
-**完成后（人工 Review 门控）**：将 AI Review 报告落盘到 docs 目录，向用户汇报审查结论，并**暂停**请求人工审批最终交付物；用户确认后整个流程正式结束。
-
----
-
-## 项目上下文适配（针对本仓库）
-
-本仓库为 Spring Boot 微服务架构项目（见 `AGENTS.md`），主要模块：
-- **micro-api**：API 接口层
-- **micro-model**：数据模型层
-- **micro-common-db**：数据库公共层
-- **micro-feign**：Feign 客户端层
-
-执行本工作流时应额外遵循：
-- 数据库操作遵循 `.agents/database.md`（MyBatis 规范、事务管理）
-- API 设计遵循 `.agents/api-design.md`（RESTful 规范、DTO 设计）
-- 代码规范遵循 `.agents/code-standards.md`、架构遵循 `.agents/architecture.md`
-- 测试规范遵循 `.agents/testing.md`（含 Feign 接口 Mock 规则）
-- 分页请求参数应继承 commons 包中的 `BasePageReq`（含 pageIndex/pageSize/sortField/sortOrder/isAsc()）
-- 查询用户名时使用 `businessAware.getUserNameByIds(AMAZON, ...)` 调用 admin-meta
-
-## 执行检查清单（AI 自检）
-
-每完成一步，AI 必须自检：
-- [ ] 本步产出物是否已落地为文档/代码文件？
-- [ ] 文档类产出物是否放在 `docs/develop/{git版本}-{需求title}-{需求id}/` 目录下？
-- [ ] 本步是否严格使用了上一步的产出物作为输入？
-- [ ] 是否已向用户汇报产出物路径并**暂停等待人工 review 确认**（未获确认不进入下一步）？
-- [ ] 第六步是否做到了"逐条 Checklist 编码"且**未编写单测**（单测留到第七步 7.1）？
-- [ ] 第七步是否在所有业务代码完成后才统一编写单测，并在 7.2 编译自愈？
-- [ ] 第八步是否已执行四维审查，逐条回溯 Checklist，并输出《AI Review 报告》？
-- [ ] 第八步审查结论是否为 ✅ PASS 或 ⚠️ CONDITIONAL PASS（且必须修复项已修复）？
+> **改完 skill 之后还要分发**：本机装了多个 agent 工具，各有独立的 `skills` 目录，
+> 不分发 = 换个工具跑的还是旧版，而且**不报错**。分发是独立 skill `distribute-agent-skills`
+> （`~/.claude/skills/distribute-agent-skills/`），顺序固定：**改 → `--self-check` 过 → 分发**。
+
+> `--self-check` 校验 **skill 自身**：`LNN` 引用是否都落在本 skill lessons 的有效编号内、计数行是否跟得上、索引表有无漏行。
+> 两个 workflow 的 lessons 是**各自独立编号**的（同一条经验在两边的编号往往不同），
+> 内容从一边复制到另一边时 `LNN` 会**静默指向错误条目** —— 不报错、不影响运行，执行时却对照到了别的 lesson。**已实际发生两次**。
+> 改完 skill（尤其是在两个 workflow 间搬内容后）跑一次，退出码 1 即有问题。
+
+🔴 **本 workflow 必须带 `--workflow backend`**（12 步，步骤号与全栈版不同：测试矩阵在 Step7、
+tasks 在 Step8、测试在 Step10、交付在 Step12）。漏了会按全栈的步骤号去找文件，全部报「产出物未找到」。
+
+`--record` 写入 `docs/develop/{...}/.workflow-state.json`，记录每步通过与否、失败项、时间戳。
+**中断后先跑 `--status` 拿续跑点**，不要从头重来。
+
+🔴 **validate_step 未通过 = 本步未完成，禁止进入下一步**，与人工 Review 门控同等效力。
+`FAIL` 必须修，`WARN` 必须在 Review 时逐条说明为何可接受。
+
+### 失败分类与处置（不是所有失败都该停下问人）
+
+`validate_step.py` 的退出码已分级：**0=通过，1=可自动修，2=必须停**。按失败类型处置：
+
+| 失败类型 | 怎么认 | 处置 |
+|---|---|---|
+| **环境问题** | preflight BLOCK；连不上库/服务；超时 | 重试 + 退避；仍不行 → 停，报具体失败项 |
+| **产出物不合规** | validate_step FAIL（缺编号、矩阵没覆盖、缺证据目录） | 自动补，**同一步最多 2 次** |
+| **编译 / 单测失败** | mvn 非 0、测试红 | 按 Step10.2「根因优先」自动修，**同一步最多 2 次** |
+| **需求理解偏差** | 实现与 Checklist 对不上、AC 无法落地、用户反馈方向错 | 🔴 **立即停** —— 自动修只会越修越偏，必须回 Step1/2 与用户对齐 |
+| **破坏性变更** | 命中原则 24 的任一项 | 🔴 **立即停**，由用户在三种方案中选，禁止 AI 自行决定 |
+| **授权类** | 写操作、生产环境、造数、提交推送 | 🔴 **立即停**，等用户明确授权 |
+
+🔴 **「同一步最多 2 次」是硬规则，且不靠记忆**：`--record` 把连续失败次数写进
+`.workflow-state.json`，第 3 次仍 FAIL 时脚本直接退出码 2 并打印停止指令。
+**收到退出码 2 就停，把 FAIL 清单和失败历史贴给用户**，不要继续自动修 ——
+反复修同一处，说明判断依据本身就是错的（典型：把需求偏差误判成产出物不合规）。
+
+阈值可调：`--max-attempts N`。调高之前先想清楚为什么这一步值得多试。
+
+> 两个脚本只用标准库，任何 python 都能跑。它们**不替代人工 Review**，只是把「能机器判的」
+> 先判掉，让人只看真正需要判断的部分。
+
+## 执行指令
+0. **Step1 之前**跑 `scripts/preflight.py`，有 BLOCK 项先修；续跑场景先 `validate_step.py --status` 拿断点
+1. 启动时 Read `doc-output-and-context.md`；用户给 Jira 号 → MCP 取 summary/Sprint → 跑 `scripts/init_workdir.py` **自动建（或复用）需求目录**，不让用户手建（Epic 号先问做哪张 Story）
+1.5 看板**一律用服务模式打开**（静态打开不能保存 / 归档，内容也不实时）：先探测 `http://127.0.0.1:8787/api/ping`，通 = 常驻服务已在（本机开机自启：`docs/develop/tools/dashboard_server.py`，内部即本 skill 的看板服务）；不通再起 `verify_dashboard.py --all --develop docs/develop --serve --port 8787`。🔴 **每次开始任务（首次启动、续跑、新会话接手）的第一条回复就输出看板地址**，写成可点击的 markdown 链接：总览 `http://127.0.0.1:8787/`，需求详情 `http://127.0.0.1:8787/index.html#/<URL 编码后的需求目录>`（目录名含中文和空格，必须编码，否则链接点不开）；每个阻塞门控汇报末尾再附一行详情链接；**每步开始前跑 `qa_record.py changes`**，有看板改动先跟用户逐条确认、同步下游、`ack` 后再继续
+2. 进入第 N 步前 Read 对应 `step-NN-*.md`，严格按约束执行
+3. 每步产出前对照 `lessons-learned.md` 该步相关 lesson 自检
+4. 产出物落盘→**跑 `validate_step.py --workflow backend --step N --record`，FAIL 必须修到通过**→汇报路径与校验结果→**暂停 review**→通过后进入下一步
+5. 全程对照 `doc-output-and-context.md` 自检清单自查
+6. Step11 增加 lessons 合规检查；Step12 全局一致性审查前回顾所有 lesson
+7. 工作流结束后主动扫描本轮是否产生可复用经验，按自进化机制提炼

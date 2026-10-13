@@ -1,0 +1,1 @@
+(() => { const e=[...document.querySelectorAll('.file-type-tab')].find(e=>e.textContent.trim()===(window.__ft||'Image') && e.getBoundingClientRect().width>0); e.scrollIntoView({block:'center'}); const r=e.getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()
