@@ -33,6 +33,7 @@ from pathlib import Path
 DEFAULT_SKILLS = ("ai-driven-fullstack-workflow", "ai-driven-backend-workflow", "cdp-drive-real-chrome", "distribute-agent-skills")
 ALWAYS_EXCLUDES = ("*/IdeaProjects/skills*", "*/ai.opencode.desktop/*")
 REPO_EXCLUDES = ("*/IdeaProjects/*",)  # 仓库内副本，--include-repos 时放开
+SKILLS_REPO = "*/IdeaProjects/skills"  # 用户的 skills 仓库本身，--include-skills-repo 时放开（备份 skills - Copy 等仍排除）
 MAX_DEPTH = 5  # 已知最深的目标是 ~/.config/kimchi/harness/skills（4 层）
 PRUNE = {"node_modules", ".git", ".m2", ".gradle", ".npm", ".cache", "__pycache__",
          ".venv", ".venvs", "site-packages", "Temp", "Packages"}
@@ -42,7 +43,7 @@ def md5(p: Path) -> str:
     return hashlib.md5(p.read_bytes()).hexdigest()
 
 
-def find_targets(home: Path, src: Path, skills, excludes: list[str]) -> list[Path]:
+def find_targets(home: Path, src: Path, skills, excludes: list[str], allow: list[str]) -> list[Path]:
     found = set()
     base_depth = len(home.parts)
     for root, dirs, _ in os.walk(home):
@@ -59,7 +60,9 @@ def find_targets(home: Path, src: Path, skills, excludes: list[str]) -> list[Pat
     out = []
     for t in sorted(found):
         posix = t.as_posix()
-        if t.resolve() == src_r or any(fnmatch.fnmatch(posix, g) for g in excludes):
+        if t.resolve() == src_r:
+            continue
+        if not any(fnmatch.fnmatch(posix, g) for g in allow) and any(fnmatch.fnmatch(posix, g) for g in excludes):
             continue
         out.append(t)
     return out
@@ -82,6 +85,8 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true", help="只列目标，不复制")
     ap.add_argument("--include-repos", action="store_true",
                     help="同时更新 IdeaProjects 各仓库内的 skill 副本（备份目录 IdeaProjects/skills* 仍排除）")
+    ap.add_argument("--include-skills-repo", action="store_true",
+                    help="同时更新 IdeaProjects/skills 这个仓库（只放开这一个，skills - Copy 等备份仍排除）")
     args = ap.parse_args()
 
     skills = tuple(args.skill) or DEFAULT_SKILLS
@@ -90,7 +95,8 @@ def main() -> int:
             sys.exit(f"源目录缺少 {s}/SKILL.md：{args.src}")
 
     excludes = list(ALWAYS_EXCLUDES) + ([] if args.include_repos else list(REPO_EXCLUDES)) + args.exclude
-    targets = find_targets(args.home, args.src, skills, excludes)
+    allow = [SKILLS_REPO] if args.include_skills_repo else []
+    targets = find_targets(args.home, args.src, skills, excludes, allow)
     print(f"源：{args.src}")
     print(f"分发：{', '.join(skills)}")
     print(f"目标 {len(targets)} 个：")
