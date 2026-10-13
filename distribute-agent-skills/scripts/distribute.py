@@ -25,6 +25,7 @@ import fnmatch
 import hashlib
 import os
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -68,6 +69,25 @@ def find_targets(home: Path, src: Path, skills, excludes: list[str], allow: list
     return out
 
 
+COMMIT_TRAILER = "Co-Authored-By: Claude Haiku 5.5 <noreply@anthropic.com>"
+
+
+def commit_repo(repo: Path, skills) -> None:
+    """只提交本次分发涉及的 skill 目录（commit -- <paths>），不碰仓库里的其他改动。永不 push。"""
+    paths = list(skills)
+    subprocess.run(["git", "-C", str(repo), "add", "-A", "--", *paths], check=True)
+    status = subprocess.run(["git", "-C", str(repo), "status", "--porcelain", "--", *paths],
+                            check=True, capture_output=True, text=True).stdout.strip()
+    if not status:
+        print(f"\n{repo}：分发后无改动，不提交")
+        return
+    msg = f"Distribute skills from ~/.claude/skills: {', '.join(paths)}\n\n{COMMIT_TRAILER}"
+    subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", msg, "--", *paths], check=True)
+    head = subprocess.run(["git", "-C", str(repo), "log", "-1", "--oneline"],
+                          check=True, capture_output=True, text=True).stdout.strip()
+    print(f"\n{repo}：已本地提交（未 push）：{head}")
+
+
 def skill_files(skill_dir: Path):
     for p in skill_dir.rglob("*"):
         if p.is_file() and "__pycache__" not in p.parts:
@@ -87,7 +107,11 @@ def main() -> int:
                     help="同时更新 IdeaProjects 各仓库内的 skill 副本（备份目录 IdeaProjects/skills* 仍排除）")
     ap.add_argument("--include-skills-repo", action="store_true",
                     help="同时更新 IdeaProjects/skills 这个仓库（只放开这一个，skills - Copy 等备份仍排除）")
+    ap.add_argument("--commit-skills-repo", action="store_true",
+                    help="分发后在 IdeaProjects/skills 里本地 commit 本次分发的 skill（需配合 --include-skills-repo；永不 push）")
     args = ap.parse_args()
+    if args.commit_skills_repo and not args.include_skills_repo:
+        ap.error("--commit-skills-repo 需要同时带 --include-skills-repo")
 
     skills = tuple(args.skill) or DEFAULT_SKILLS
     for s in skills:
@@ -125,6 +149,12 @@ def main() -> int:
                 if f.relative_to(dst_dir) not in expected:
                     orphans.append(f)
     print(f"复制 {copied} 个文件，MD5 不一致 {bad} 个")
+    if args.commit_skills_repo:
+        if bad:
+            print("MD5 不一致，跳过提交")
+        for t in targets:
+            if t.parent.name == "IdeaProjects" and t.name == "skills":
+                commit_repo(t, skills)
     if orphans:
         print(f"\n残留 {len(orphans)} 个（源里没有、目标里还留着；本脚本不删，交给你决定）：")
         for f in orphans[:40]:

@@ -42,6 +42,7 @@ python scripts/distribute.py --skill pacvue-common-utils --skill creativehub-int
 | `--exclude GLOB` | 额外排除的目标目录 glob，可多次 |
 | `--include-repos` | 连 `IdeaProjects/` 下各仓库内的 skill 副本一起更新（见下方红线） |
 | `--include-skills-repo` | 连 `IdeaProjects/skills` 这个 skills 仓库一起更新（只放开这一个；`skills - Copy` 等备份仍排除） |
+| `--commit-skills-repo` | 分发后在 `IdeaProjects/skills` 里**本地 commit** 本次分发的 skill 目录（只提交这些路径，不动仓库里其他改动；MD5 不一致则不提交）。**永不 push**。需配合 `--include-skills-repo` |
 
 ## 目标是怎么选出来的（别手工拷）
 
