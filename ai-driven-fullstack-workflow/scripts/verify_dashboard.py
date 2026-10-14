@@ -744,6 +744,43 @@ def load_qa(req: Path) -> dict:
                        for s in sh["shares"] if s.get("status") == "active" and s.get("token")]}
 
 
+I18N_FILE = "Step 13-多语言新增key清单.md"
+
+
+def load_i18n(req: Path) -> dict:
+    """全栈 Step13 末尾产出的《Step 13-多语言新增key清单.md》→ 看板「多语言」页签（可导出 csv / md）。
+
+    按「## 标题」切节；每节取第一张 markdown 表（表头 + 行）或列表项。人工补的建议译文以 md 为准，看板只读。
+    """
+    f = req / I18N_FILE
+    if not f.exists():
+        return {"exists": False, "sections": [], "raw": ""}
+    raw = read_text(f)
+    sections, cur = [], None
+    for line in raw.splitlines():
+        if line.startswith("## "):
+            cur = {"title": line[3:].strip(), "headers": [], "rows": [], "items": [], "notes": []}
+            sections.append(cur)
+            continue
+        if cur is None:
+            continue
+        s = line.strip()
+        if s.startswith("|"):
+            cells = [_strip_md_cell(c) for c in s.strip("|").split("|")]
+            if all(re.fullmatch(r":?-{2,}:?", c.strip()) for c in cells if c.strip()):
+                continue
+            if not cur["headers"]:
+                cur["headers"] = cells
+            else:
+                cur["rows"].append(cells)
+        elif s.startswith("- "):
+            cur["items"].append(s[2:].strip())
+        elif s and not s.startswith(">"):
+            cur["notes"].append(s)
+    return {"exists": True, "file": I18N_FILE, "raw": raw, "sections": sections,
+            "todo": len(sections[0]["rows"]) if sections and sections[0]["headers"] else 0}
+
+
 STEP_FILE_RE = re.compile(r"^Step\s*(\d+)(?:\.\d+)*\s*[-－_.\s]")
 
 
@@ -871,6 +908,7 @@ def build_snapshot(req: Path, workflow=None, ttl=20.0) -> dict:
         "handover": ho_pub,
         "has_checklist": ck_path.exists(), "registry_error": reg_err,
         "qa": load_qa(req),
+        "i18n": load_i18n(req),
         "ui_images": sorted((f"{req.name}/UI/{x.name}" for x in (req / "UI").iterdir()
                              if x.suffix.lower() in UI_IMG_EXT), key=lambda s: s) if (req / "UI").is_dir() else [],
         "unnumbered": unnumbered, "has_ac_ids": bool(ck_items),

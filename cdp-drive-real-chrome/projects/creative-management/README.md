@@ -185,13 +185,14 @@ PYTHONIOENCODING=utf-8 python $S/scripts/annotate.py ev/raw.png ev/AC-NN-01-<中
 
 ## 图片 Creative 生成页脚本（`creativehub-*`，CP-58118 入库，最后验证 2026-10-13）
 
-> 页面：Creative Generation / Image Generation（UrlToImage、Product to Creative、Creative Generation 抽屉）。口径与坑见 `PAGE-NOTES.md`「图片 Creative 生成页」。
+> 页面：Creative Generation / Image Generation（UrlToImage、UrlToCreative 的 Product List / Product Image / Product URL 来源、Creative Generation 抽屉）。口径与坑见 `PAGE-NOTES.md`「图片 Creative 生成页」。
 > 连接层一律 L0 `../../scripts/sconn.mjs`（= conn.mjs hardCap：≤30s 超时；截图不抢前台，兜底顺序见 SCRIPTS 坑 50）；每组设自己的 `CDP_TARGET`；开测先 `../../scripts/chk401.mjs --match creative-local`。
 > 🔴 会点 Generate 的脚本（`creativehub-gen-run.mjs`、不带 `DRY=1` 的 `creativehub-fields-compare.mjs`）= 写操作，每次运行前单独取得用户授权。
-> 🔴 CP-58118 期间后端出图是写死的 mock（上线前删，见 PAGE-NOTES「需求临时备注」）—— mock 删除后 `creativehub-fields-compare.mjs` 要设 `EVIDENCE_TYPE`，别让「mock 出图」的说明进证据。
+> 🔴 后端出图 mock 已于 2026-10-14 删除，出图 / PD / 卖点 / 优化都打真实 creative-ai（耗 AI 额度）：`creativehub-fields-compare.mjs` 要设 `EVIDENCE_TYPE`，别让「mock 出图」的说明进证据；选品跳过服饰内衣类（AI 合规拒图返回 success 但 images 为空）。
 
 | 文件 | 干什么 | 用法 / 输出 |
 |---|---|---|
+| `creativehub-library-drawer.mjs` | **素材库抽屉只读回归**（CP-58118 Q100，2026-10-14 入库）：打开时序（页面内 50ms 采样，t=0 为点击前）、默认 Tag 预选、列表请求 tagIds、`--clear` 去掉预选再 Search；`--entry reference` 走 Reference「+」回归「不带预选的入口不受影响」。只开抽屉不选图，**不需要写授权** | `node creativehub-library-drawer.mjs --out <证据目录> [--page IG\|CG] [--entry source\|reference] [--clear] [--wait 4000]` → `library-<page>-<entry>.json` + 同帧 `-raw.png` / rects（给 `annotate.py --rects`） |
 | `wait-lib.mjs` | 🔴 **本项目「等 loading 遮罩消失」的唯一写法**：`makeBusyGone(c, {sel,overlay,key})` 造等待表达式，`waitBusyGone(c, expr, {total,minTicks,label})` 等它消失；**超时抛错并带 polls/elapsed**（旧手写 `for(k<180){sleep(1000)}` 超时后会静默继续，后面全读中间态） | `import { makeBusyGone, waitBusyGone } from "./wait-lib.mjs"`；已接入 9 个脚本（ads-search / group-by / date-range / compare / sort-check / kpi-wait / drawer-from-ads / creativehub-*） |
 | `creativehub-lib.js` | 页面工具库：只读网络钩子（`__aiLog`）、`__g1.state()` 读宿主状态（含选品 `imgUrl`）、`__g1.rects()` 判定点几何（含来源图 / 参考图区）、`rec()` / `s97()` 只读采样、弹窗记录 | `ev.mjs --file creativehub-lib.js`；入库时修了 Lifestyle 子串误中、`imgUrl`、参考图区 |
 | `creativehub-find.js` + `creativehub-state.js` | 递归 Vue 树找图片生成宿主（`window.__u2i`）→ 读摘要（Ad Type / Result type / PD / 卖点 / Prompt / 参考图 / canGenerate） | 被 `creativehub-drive.mjs` 的 `c.state()` 调用 |

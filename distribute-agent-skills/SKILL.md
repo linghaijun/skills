@@ -1,6 +1,6 @@
 ---
 name: "distribute-agent-skills"
-description: "把本机源 skills 目录（~/.claude/skills）里改好的 skill 分发到其他 agent 工具的 skills 目录（Cursor / Trae / opencode / kimchi 等），默认只覆盖不删除（源里删掉的文件看过残留清单后用 --prune 清理）、逐文件 MD5 校验、先 --dry-run 看目标。改完任何 skill 并自检通过后使用。触发词：分发 skill、同步 skill、skill 改完了、distribute、把 skill 推到其他 agent、其他工具看不到新 skill。"
+description: "把本机源 skills 目录（~/.claude/skills）里改好的 skill 分发到其他 agent 工具的 skills 目录（按根目录 targets.txt 白名单：Cursor / Trae / WorkBuddy / Qoder / opencode 桌面版 / .agents 等），默认只覆盖不删除（源里删掉的文件看过残留清单后用 --prune 清理）、逐文件 MD5 校验、先 --dry-run 看目标。改完任何 skill 并自检通过后使用。触发词：分发 skill、同步 skill、skill 改完了、distribute、把 skill 推到其他 agent、其他工具看不到新 skill。"
 ---
 
 # Skill 分发（distribute-agent-skills）
@@ -40,7 +40,8 @@ python scripts/distribute.py --skill pacvue-common-utils --skill creativehub-int
 | `--force` | 目标在上次分发后被别处改过也照样覆盖（**先确认那些改动不要了**；新增文件仍不删） |
 | `--src DIR` | 源 skills 目录，默认本脚本所在 skill 的上级目录（即 `~/.claude/skills`） |
 | `--home DIR` | 搜索根目录，默认用户目录 |
-| `--exclude GLOB` | 额外排除的目标目录 glob，可多次 |
+| `--exclude GLOB` | 额外排除的目标目录 glob，可多次（白名单模式下同样生效） |
+| `--all-targets` | 忽略 `targets.txt` 白名单，按旧规则扫描用户目录下所有装过 skill 的 `skills` 目录（约 59 个）。只在用户要求「全部铺一遍」时用 |
 | `--prune` | 复制全部成功（MD5 0 不一致）后删除残留文件与清空的目录。**先不带它跑一次看残留清单，确认后再加**（见下方「残留看过清单再清理」） |
 | `--include-repos` | 连 `IdeaProjects/` 下各仓库内的 skill 副本一起更新（见下方红线） |
 | `--include-skills-repo` / `--no-include-skills-repo` | **默认开**：同步 `IdeaProjects/skills` 本仓库；关掉用 `--no-include-skills-repo`（`skills - Copy` 等备份始终排除） |
@@ -64,6 +65,10 @@ python scripts/distribute.py --skill pacvue-common-utils --skill creativehub-int
 
 ## 目标是怎么选出来的（别手工拷）
 
+🔴 **白名单优先（2026-10-14 起）**：本 skill 根目录的 `targets.txt` 列出要分发的 skills 目录（相对用户目录，一行一个），存在时**只分发到这些目录**，名单里已存在的目录即使没装过也会装上；不在名单里的旧副本原样留着、不删。当前名单 9 个：cursor、trae / trae-cn、workbuddy、qoder / qoder-cn、通用 `.agents`、opencode 桌面版（`AppData/Roaming/ai.opencode.desktop`）、`IdeaProjects/skills`；claude 是源目录本身，dsh 没有自己的 skills 目录（读 `~/.claude/skills` 或 `~/.agents/skills`）。用户新装 / 停用某个 agent 工具时改这个文件，不改脚本。
+
+下面是 `--all-targets`（或没有 `targets.txt`）时的旧规则：
+
 目标 = 用户目录下（深度 ≤ 5）**已经装了任一待分发 skill** 的、名字就叫 `skills` 的目录。
 
 - **「装过的才更新」**：不会往没装过的新 agent 目录里铺
@@ -79,7 +84,7 @@ python scripts/distribute.py --skill pacvue-common-utils --skill creativehub-int
 | `IdeaProjects/skills`（本仓库） | **默认纳入**；关掉用 `--no-include-skills-repo` |
 | `IdeaProjects/skills*` 备份（如 `skills - Copy`） | 始终排除（备份被覆盖就不再是备份） |
 | `IdeaProjects/` 下各仓库内的 `.claude/skills` | 默认排除；要同步加 `--include-repos` |
-| `ai.opencode.desktop` | 始终排除（未经确认不覆盖） |
+| `ai.opencode.desktop` | 旧规则（`--all-targets`）下始终排除；白名单模式按 `targets.txt`，2026-10-14 用户确认在用 opencode 后已列入 |
 
 ## 默认只覆盖；残留看过清单再清理
 
@@ -120,12 +125,14 @@ python scripts/distribute.py --skill pacvue-common-utils --skill creativehub-int
 
 - **MD5 不一致 > 0 → 退出码 1，没分发成功**，别报告「已分发」
 - 复制数突然比上次少一大截 → 先查是不是 `--dry-run` 忘删、或者排除规则误伤了目标
-- 目标数变了（之前 58 个，这次 3 个）→ 先搞清楚为什么，不要直接跑
+- 目标数变了（白名单模式现在是 9 个；`--all-targets` 时约 59 个）→ 先搞清楚为什么，不要直接跑
 
 🔴 **报告给用户时写真实数字**（目标数 / 文件数 / 不一致数），不要只写「已分发完成」。
 
-## 加一个新 agent 工具怎么办
+## 加 / 停用一个 agent 工具怎么办
 
-脚本只更新装过的目录，所以**第一次**要手工把 skill 目录拷过去一次（或让该工具自己装），
-之后它就会自动进入目标列表。不要为了「让脚本铺到新目录」去改排除规则 ——
-那条规则是防止往备份和仓库里乱写的，不是用来绕的。
+在 `targets.txt` 里加 / 删一行（该工具 skills 目录相对用户目录的路径，注释写明是哪个工具），先 `--dry-run` 核对目标数，再正式分发。
+名单里的目录已存在就会直接装上，不需要先手工拷；目录还不存在的先让该工具启动一次（或手工建目录）。
+停用的工具从名单删掉即可，它目录里的旧副本不会被删除。
+
+🔴 不要为了「让脚本铺到新目录」去改脚本里的排除规则 —— 那条规则是防止往备份和仓库里乱写的，不是用来绕的。

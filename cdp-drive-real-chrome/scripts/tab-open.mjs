@@ -10,8 +10,25 @@
 //   - 同账号只读 AC 可以并行；
 //   - 会「写」持久化偏好的 AC（列配置 / KPI 卡片 / Group by 记忆 / 日期范围等存 localStorage 的）
 //     互相会覆盖 → 放进同一组串行，或者换独立 --user-data-dir 的实例（见 SKILL.md §2.5）。
-import { PORT, listPages } from "./conn.mjs";
+//
+// 窗口标记（2026-10-14，取自 browser-harness 的标签标记）：--open 默认把分组名写进该标签的 sessionStorage.__cdp_mark，
+// 标题变成「[g1] 原标题」—— 并行 4 个窗口时用户和 agent 一眼分清哪个是哪组；之后任何 conn.mjs 连接都会补回前缀（reload / 路由改标题也不丢）。
+// 跨域跳转（如登录页）后会丢，登录回来再 `--mark <targetId> --name g1` 一次。--no-mark 关闭；只影响标签标题，不进截图。
+import { PORT, listPages, connect, TAB_MARK_JS } from "./conn.mjs";
 const arg = (n, d) => { const i = process.argv.indexOf(n); return i >= 0 && process.argv[i + 1] ? process.argv[i + 1] : d; };
+const NO_MARK = process.argv.includes("--no-mark");
+
+// 等标签加载到能写 sessionStorage（http(s) 页面），写入分组名并立即改标题；返回改后的标题，失败返回 null（不影响开窗结果）
+async function markTab(targetId, name) {
+  let c;
+  try {
+    c = await connect({ target: targetId, port: PORT });
+    await c.waitFor(`document.readyState === "complete" && /^https?:/.test(location.href)`, { total: 20000, min: 100, max: 400 }).catch(() => {});
+    await c.ev(`(() => { const old = sessionStorage.getItem("__cdp_mark"); if (old && old !== ${JSON.stringify(name)}) sessionStorage.setItem("__cdp_mark_prev", old); sessionStorage.setItem("__cdp_mark", ${JSON.stringify(name)}); })()`);
+    return await c.ev(TAB_MARK_JS);
+  } catch (e) { console.error(`mark ${targetId} 失败：${e.message}`); return null; }
+  finally { c?.close(); }
+}
 
 if (process.argv.includes("--list")) {
   for (const p of await listPages()) console.log(`${p.id}  ${p.url}`);
@@ -33,8 +50,15 @@ if (arg("--close")) {
     const r = await send("Target.createTarget", { url, newWindow: true });
     out.push({ name: names[i] || `g${i + 1}`, targetId: r.result && r.result.targetId, url, window: `cdp:${PORT}/${r.result && r.result.targetId}` });
   }
+  if (!NO_MARK) for (const o of out) if (o.targetId) o.title = await markTab(o.targetId, o.name);
+  console.log(JSON.stringify(out, null, 1));
+} else if (arg("--mark")) {
+  const ids = arg("--mark").split(","); const names = (arg("--name", "") || "").split(",").filter(Boolean);
+  const out = [];
+  for (let i = 0; i < ids.length; i++) out.push({ targetId: ids[i], name: names[i] || `g${i + 1}`, title: await markTab(ids[i], names[i] || `g${i + 1}`) });
   console.log(JSON.stringify(out, null, 1));
 } else {
-  console.log("usage: --list | --open <url> [--n N] [--name a,b] | --close id1,id2");
+  console.log("usage: --list | --open <url> [--n N] [--name a,b] [--no-mark] | --mark id1,id2 --name a,b | --close id1,id2");
 }
-ws.close(); process.exit(0);
+// 不能 close 完立刻 process.exit：Windows 上会撞 libuv 断言「UV_HANDLE_CLOSING」、退出码 127（2026-10-14 实测，markTab 多开了连接后出现）
+ws.close(); setTimeout(() => process.exit(0), 200);

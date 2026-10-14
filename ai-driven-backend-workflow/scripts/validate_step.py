@@ -1049,6 +1049,24 @@ def check_earlier_steps(d: Path, wf: str, final_step: int, skipped: set[int] | N
     else:
         add(OK, "前序步骤复检", f"{scope} 按当前产出物全部通过")
 
+
+I18N_FILE_NAME = "Step 13-多语言新增key清单.md"
+
+
+def check_i18n_list(d: Path) -> None:
+    """全栈交付门禁：Step13 末尾必须有《Step 13-多语言新增key清单.md》（无新增也要生成并写「无」）；第 3 节编码 key 必须为空。"""
+    f = d / I18N_FILE_NAME
+    if not f.exists():
+        add(FAIL, "多语言新增 key 清单",
+            f"未找到 {I18N_FILE_NAME} —— 跑 scripts/i18n_new_keys.py 生成（无新增也要生成），见 step-13「13.末」")
+        return
+    text = read(f)
+    m = re.search(r"^## 3\.[^\n]*\n(.*?)(?=^## |\Z)", text, re.M | re.S)
+    if m and re.search(r"^- `[^`]+`", m.group(1), re.M):
+        add(FAIL, "多语言新增 key 清单", "第 3 节有线上翻译库不存在的编码 key —— 页面会直接显示编码，先改用已上线的 key")
+    else:
+        add(OK, "多语言新增 key 清单", f"{I18N_FILE_NAME} 已生成")
+
 def check_tasks_done(d: Path, wf: str, spec, scope: str = "coding") -> None:
     """tasks.md 不得留未勾选项（`- [ ]`）—— 没做完的任务要么做完勾上，要么写明取消 / 移交原因后勾上。
 
@@ -1667,6 +1685,8 @@ def main() -> None:
             check_tasks_done(d, args.workflow, spec, scope="all")
             check_handover(d, args.workflow)
             check_handover_fresh(d, args.workflow)
+            if args.workflow == "fullstack":
+                check_i18n_list(d)
             check_evidence_acceptance(d, acs, args.workflow)
             check_state_vs_result(d)
             check_regression_summary(d, args.workflow, rs)

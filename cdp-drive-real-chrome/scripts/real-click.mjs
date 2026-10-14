@@ -21,6 +21,10 @@
 //   --after <ms>   点击后等待，默认 600
 //   --list         列出该选择器下所有可见元素的文本后退出（不点）
 //   --out <png>    点击后截图
+//   --force        目标被挡住也照点（默认：被挡住退出码 4，stderr 打印命中的元素链）
+//
+// 退出码：0 已点击 / 3 找不到或参数错 / 4 被遮挡（遮罩、弹层、抽屉盖在上面）
+// 不在视口内的目标会先 scrollIntoView（block/inline 居中）再取坐标；输出里 scrolled:true 表示滚过页面
 //
 // 为什么必须真鼠标事件：`el.click()` 只派发 JS 事件，很多组件（Popper/ElTooltip/拖拽）
 // 监听的是 pointerdown/mousedown 或依赖坐标，JS click 静默无效 —— 表现为「点了没反应」。
@@ -40,6 +44,7 @@ const DBL = has("--dbl");
 const AFTER = Number(flag("--after", 600));
 const OUT = flag("--out", "");
 const LIST = has("--list");
+const FORCE = has("--force");
 
 if (!SEL) {
   console.error("MISSING --sel");
@@ -100,18 +105,21 @@ if (o.mode === "list") {
   process.exit(0);
 }
 
-const x = Math.round(o.x);
-const y = Math.round(o.y);
-await send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y, button: "none", clickCount: 0 });
-await sleep(200);
-await send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", clickCount: 1 });
-await sleep(60);
-await send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", clickCount: 1 });
-if (DBL) {
-  await sleep(60);
-  await send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", clickCount: 2 });
-  await sleep(60);
-  await send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", clickCount: 2 });
+// 2026-10-14：点击改走 conn.mjs 的 clickEl —— 不在视口先 scrollIntoView，点前 elementFromPoint 查遮挡（坑 43 / 63），
+// 被遮罩 / 弹层挡住直接退出码 4 并打印命中链，不再「点击成功但没反应」；确认要穿透才加 --force。
+let r;
+try {
+  r = await c.clickEl(`(() => {
+    const tx = (e) => (e.textContent || "").trim().replace(/\\s+/g, " ");
+    const vis = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+    const visible = [...document.querySelectorAll(${JSON.stringify(SEL)})].filter(vis);
+    const hits = ${TEXT ? `visible.filter((e) => tx(e) === ${JSON.stringify(TEXT)})` : "visible"};
+    return hits[${NTH}];
+  })()`, { force: FORCE, hoverMs: 200, dbl: DBL });
+} catch (e) {
+  console.error(JSON.stringify({ err: e.code || "click-failed", msg: e.message, info: e.info || null }));
+  c.close();
+  process.exit(e.code === "occluded" ? 4 : 3);
 }
 
 if (OUT) {
@@ -120,11 +128,14 @@ if (OUT) {
 
 console.log(
   JSON.stringify({
-    clicked: { x, y },
+    clicked: { x: r.x, y: r.y },
     tag: o.tag,
     hits: o.hits,
     nth: NTH,
     cls: o.cls,
+    scrolled: r.scrolled,
+    hit: r.hit,
+    forced: r.forced,
     shot: OUT || null,
   })
 );

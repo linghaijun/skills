@@ -14,7 +14,7 @@
 
 - 后端（`creative-management` / `platform-provider`）：冒号后不带空格 —— `fix:CP-57723 图搜统一走 AssetManager`
 - 前端（`vuen-crossretail` 外层与 `packages/creativehub` 嵌套仓）：冒号后**必须**带空格 —— `feat: CP-56964 instacart Ads 表 Ad 列不出跳转链接`（commitlint 按 conventional 解析 `type: subject`，不带空格解析不出 type → `type-empty` 报错）
-- **header ≤ 72 字符**（两边一致）
+- **header ≤ 72 字符**（两边一致）。🔴 **自查长度按字符数算**：`py -c "import sys;print(len(open(sys.argv[1],encoding='utf-8').readline().rstrip()))" msg.txt`；**别用 `awk length` / `wc -c`**——Git Bash 的 awk 按字节算，一个中文算 3，会把合规的标题误判超长（2026-10-14 误报 5 行）。commitlint 与 `.githooks/commit-msg` 都按字符算
 - **必须含 JIRA 票号**。票号未知时**问用户**，不要编。
 
 各仓实际校验（2026-10-14 实读，规则以仓库文件为准）：

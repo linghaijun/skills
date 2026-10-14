@@ -27,7 +27,7 @@ const REGR_V={pass:["通过","b-pass"],partial:["部分","b-fix"],not_run:["未�
 const CK_LABEL={done:"Checklist done",open:"Checklist open",blocked:"blocked",waived:"waived（放行）"};
 const HATCH="repeating-linear-gradient(45deg,var(--skip) 0 2px,transparent 2px 4px)";
 const COL={"待验证":"var(--pend)","验证中":"var(--run-s)","修复中":"var(--fix-s)","通过":"var(--pass-s)","失败":"var(--fail-s)","阻塞":"var(--blk-s)","部分":"var(--part-s)","走读证据":"var(--ro)","跳过":HATCH};
-const TABS=[["overview","总览"],["qa","需求问答"],["cases","用例明细"],["evidence","证据"],["regression","回归"],["timeline","时间线"],["guide","说明"]];
+const TABS=[["overview","总览"],["qa","需求问答"],["cases","用例明细"],["evidence","证据"],["regression","回归"],["timeline","时间线"],["i18n","多语言"],["guide","说明"]];
 const TAB_KEYS=TABS.map(t=>t[0]);
 
 // ---------------------------------------------------------------- 本地记忆（失败不影响功能）
@@ -354,11 +354,11 @@ function renderOne(req){let h='';
  const m=metrics(req);const rs=risks(req);const hi=rs.filter(r=>r.l==='high').length;
  const qa=req.qa||{},qpm=(qa.questions||[]).filter(q=>q["状态"]==="待PM确认").length,qch=(qa.pending||[]).length;
  const cnt={qa:(qa.exists?(qa.questions||[]).length:'')+(qpm?' · 待PM '+qpm:'')+(qch?' · 待确认改动 '+qch:''),
-  cases:m.total,evidence:m.ev,regression:m.regs.length?m.rd+'/'+m.regs.length:''};
+  cases:m.total,evidence:m.ev,regression:m.regs.length?m.rd+'/'+m.regs.length:'',i18n:(req.i18n||{}).exists?((req.i18n.todo||0)+' 待译'):''};
  const alarm={overview:hi,cases:m.cnt["失败"]+m.cnt["阻塞"],qa:(qa.errors||[]).length};
  h+='<div class="tabs" role="tablist">'+TABS.map(([k,t],i)=>'<button role="tab" class="'+(state.tab===k?'on':'')+'" onclick="tab(\''+k+'\')">'+t+
   (alarm[k]?'<span class="cnt alarm">'+alarm[k]+'</span>':(cnt[k]!==undefined&&cnt[k]!==''?'<span class="cnt">'+cnt[k]+'</span>':''))+'<span class="kbd">'+(i+1)+'</span></button>').join('')+'</div>';
- const VIEWS={overview:viewOverview,qa:viewQa,cases:viewCases,evidence:viewEvidence,regression:viewRegression,timeline:viewTimeline,guide:viewGuide};
+ const VIEWS={overview:viewOverview,qa:viewQa,cases:viewCases,evidence:viewEvidence,regression:viewRegression,timeline:viewTimeline,i18n:viewI18n,guide:viewGuide};
  try{h+=(VIEWS[state.tab]||viewOverview)(req);}
  catch(e){h+='<div class="banner err"><b>渲染出错</b>：'+esc(e&&e.message||e)+'<br><span class="muted small">'+esc((e&&e.stack||'').split('\n').slice(0,3).join(' | '))+'</span></div>';console.error(e);}
  return h;}
@@ -750,6 +750,28 @@ function qaDownload(fmt){const req=curSnap();const txt=qaPmText(req,fmt);
  const blob=new Blob([txt],{type:fmt==='csv'?'text/csv;charset=utf-8':'text/markdown;charset=utf-8'});
  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='待产品确认-'+(req.id||req.folder)+'.'+(fmt==='csv'?'csv':'md');
  document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},500);}
+// ---- 多语言新增 key（全栈 Step13 末尾《Step 13-多语言新增key清单.md》，只读；导出给本地化）
+function i18nCsv(req){const sec=((req.i18n||{}).sections||[])[0];if(!sec||!sec.headers.length)return '';
+ const c=v=>'"'+String(v==null?'':v).replace(/`/g,'').replace(/"/g,'""')+'"';
+ return '﻿'+[sec.headers.map(c).join(',')].concat(sec.rows.map(r=>r.map(c).join(','))).join('\r\n');}
+function i18nDownload(fmt){const req=curSnap();const i=req.i18n||{};const txt=fmt==='csv'?i18nCsv(req):(i.raw||'');
+ const blob=new Blob([txt],{type:fmt==='csv'?'text/csv;charset=utf-8':'text/markdown;charset=utf-8'});
+ const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='Step 13-多语言新增key清单-'+(req.id||req.folder)+'.'+(fmt==='csv'?'csv':'md');
+ document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},500);}
+async function i18nCopy(btn){await copyText((curSnap().i18n||{}).raw||'');btn.textContent='已复制 ✓';setTimeout(()=>{btn.textContent='复制全文';},1600);}
+function viewI18n(req){const i=req.i18n||{};
+ if(!i.exists)return '<div class="panel">尚无 <code>Step 13-多语言新增key清单.md</code>（全栈 Step13 最后一步产出，脚本 <code>scripts/i18n_new_keys.py</code> 生成骨架）。</div>';
+ let h='<div class="panel"><div class="qa-tools"><h3 style="margin:0">多语言新增 key（待补译 '+(i.todo||0)+'）</h3><span class="sp"></span>'+
+  '<button onclick="i18nCopy(this)">复制全文</button><button onclick="i18nDownload(\'md\')">导出 .md</button>'+
+  '<button onclick="i18nDownload(\'csv\')"'+(i.todo?'':' disabled')+'>导出 .csv（Excel，待补译表）</button></div>'+
+  '<div class="small muted">以 <code>'+esc(i.file)+'</code> 为准（只读）；建议译文仅供本地化参考，补词在 localization 仓库做。</div></div>';
+ (i.sections||[]).forEach(sec=>{h+='<div class="panel"><h3 style="margin-top:0">'+esc(sec.title)+'</h3>';
+  (sec.notes||[]).forEach(n=>{h+='<div class="small muted">'+esc(String(n).replace(/\*\*/g,''))+'</div>';});
+  if(sec.headers.length)h+='<div class="tw"><table><thead><tr>'+sec.headers.map(x=>'<th>'+esc(x)+'</th>').join('')+'</tr></thead><tbody>'+
+   sec.rows.map(r=>'<tr>'+r.map(x=>'<td>'+esc(x)+'</td>').join('')+'</tr>').join('')+'</tbody></table></div>';
+  if((sec.items||[]).length)h+='<ul>'+sec.items.map(x=>'<li>'+esc(String(x).replace(/\*\*/g,''))+'</li>').join('')+'</ul>';
+  h+='</div>';});
+ return h;}
 async function copyText(t){try{await navigator.clipboard.writeText(t);}catch(e){const ta=document.createElement('textarea');ta.value=t;document.body.appendChild(ta);ta.select();document.execCommand('copy');ta.remove();}}
 async function qaCopy(btn){await copyText(qaPmText(curSnap(),'md'));btn.textContent='已复制 ✓';setTimeout(()=>{btn.textContent='复制';},1600);}
 function pmShares(req){const ss=(req.qa||{}).shares||[];if(!ss.length)return '';

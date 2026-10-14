@@ -2,7 +2,7 @@
 // 用法:
 //   node cdp.mjs <exprFile>               执行 JS，打印结果
 //   node cdp.mjs <exprFile> --shot        执行 JS 后截图（默认 cdp-shot.png，用 --out 改）
-//   node cdp.mjs <exprFile> --realclick   exprFile 返回 Element/selector 字符串，用真鼠标点击它
+//   node cdp.mjs <exprFile> --realclick   exprFile 返回 Element/selector 字符串，用真鼠标点击它（先滚进视口 + 遮挡检查：被挡住退出码 5，加 --force 照点）
 //   node cdp.mjs <exprFile> --download    设下载目录后执行 JS（用于触发导出；完整导出验证用 export-target.mjs）
 //
 // 下载目录：--dl-dir <dir> > 环境变量 CDP_DL_DIR > <系统临时目录>/cdp-downloads（2026-10-13 起不再写死本机仓库路径）
@@ -96,27 +96,20 @@ try {
 }
 
 if (mode === "--realclick") {
-  const resolveRes = await send("Runtime.evaluate", {
-    expression: `(() => { const t = (${expression}); return t && t !== "" ? "OK" : "MISS"; })()`,
-    returnByValue: true,
-  });
-  console.error("[cdp] resolve: " + resolveRes.result?.value);
-  const box = await send("Runtime.evaluate", {
-    expression: `(() => {
-      const t = (${expression});
-      if (!t || !t.getBoundingClientRect) return null;
-      const r = t.getBoundingClientRect();
-      return { x: r.x + r.width / 2, y: r.y + r.height / 2, w: r.width, h: r.height };
-    })()`,
-    returnByValue: true,
-  });
-  const p = box.result?.value;
-  if (!p || !p.w) { console.error("[cdp] target not found/zero-size: " + JSON.stringify(p)); process.exit(4); }
-  console.error(`[cdp] realclick at ${Math.round(p.x)},${Math.round(p.y)} size=${Math.round(p.w)}x${Math.round(p.h)}`);
-  for (const type of ["mousePressed", "mouseReleased"]) {
-    await send("Input.dispatchMouseEvent", { type, x: p.x, y: p.y, button: "left", clickCount: 1, buttons: 1 });
+  // 2026-10-14：改走 conn.mjs 的 clickEl（滚进视口 + 遮挡检查；被挡住退出码 5，--force 照点），不再各写一份
+  ws.close();
+  const { connect } = await import("./conn.mjs");
+  const c = await connect({ port: PORT, target: page.id });
+  try {
+    const r = await c.clickEl(expression.trim().replace(/;\s*$/, ""), { force: has("--force") });
+    console.error("[cdp] realclick " + JSON.stringify(r));
+  } catch (e) {
+    console.error("[cdp] " + e.message);
+    c.close();
+    process.exit(e.code === "occluded" ? 5 : 4);
   }
-  console.error("[cdp] realclick done");
+  c.close();
+  process.exit(0);
 } else {
   if (mode === "--download") {
     fs.mkdirSync(DL_DIR, { recursive: true });

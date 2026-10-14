@@ -2,6 +2,34 @@
 
 上次 review：2026-10-14（下次到期：+7 天，即 2026-10-21）
 
+## 2026-10-14（第四轮 · 移植 browser-use / browser-harness 的 7 项，用户确认「1-7 都改」）
+
+> 来源：browser-use `c75e847`、browser-harness `dbf0e4f`（只读源码，未引入任何依赖或代码文件；手法用 Node 重写）。
+
+### 改动清单
+1. 新增 L0 `clickables.mjs` + 页面代码 `clickables-page.js`：`getEventListeners`（`includeCommandLineAPI`）认出 Vue `@click` 的 div，可见性 + 遮挡过滤，编号清单 + `--click n`。
+2. `conn.mjs` 新增 `clickEl`（滚进视口 + 遮挡检查，被挡不点、抛 occluded）；`real-click.mjs`、`cdp.mjs --realclick` 改走它（新增 `--force`，退出码 4 / 5）。
+3. `conn.mjs` 原生弹窗：连接时 `Page.enable` 订阅；弹出即拒绝挂起的 Runtime/Input；`pendingDialog` / `handleDialog`；**连接时探活 + `isFrozen` / `rescue`**；`close()` 自动取消未处理弹窗。
+4. `tab-open.mjs` 窗口标记（sessionStorage + 标题前缀，`--mark` / `--no-mark`）；`conn.mjs` 每次连接补标记（`CDP_TAB_MARK=0` 关）。
+5. `conn.mjs` 新增 `fill`（真键盘全选 commands:selectAll + insertText + input/change + 读回）。
+6. `c.ev` 报错带行列 + 该行代码；顶层 `return` / `await` 自动包 async 函数重试。
+7. 新增 L0 `upload.mjs` + `c.setFiles`。
+
+### 验证
+- 离线：新套件 `tests/run-interact.mjs` 37 例；旧 6 套件 92 例全绿（共 129）。假 Chrome 补了 elementFromPoint / activeElement / insertText / 弹窗冻结 / `--cover`。
+- 真机（9222，独立 profile `cdp-chrome-profile`，自开 `127.0.0.1:9222/json/version` 窗口造 DOM，跑完关窗）：`tests/real-interact.mjs` **29/29**，连跑两遍；业务页只读跑 `clickables`（AIImageOptimizer，1309 元素 318ms 列 47 个）。
+
+### 本轮新坑（SCRIPTS.md 62~64）
+- 62 弹窗归开启时的连接，断开后成孤儿：新连接收不到、关不掉，旧 connect 要 38s（真机抓到后才加的探活 + rescue + close 自动取消）。
+- 63 点击前查遮挡（坑 43 落地）。
+- 64 Windows `ws.close()` 后立刻 `process.exit()` → libuv 断言退出码 127（tab-open 已改）。
+- 另：`clickables` 首版顶层 `const __OPT` 第二次注入报重复声明（离线抓到，改为块作用域）；维护时 Bash heredoc 又吃掉 `\\n`（坑 23 第四次）→ 含反斜杠内容一律 Write / Edit。
+
+### 未做 / 遗留
+- 常驻后台连接（browser-harness 核心）不做：与 targetId 锁窗口 / 子 agent 隔离冲突，收益约 0.3s/次。
+- `click-js.mjs` / `c.click({x,y})` 仍是纯坐标点击、不查遮挡（没有目标元素可比对），文档已注明。
+- `cdp.mjs` 非 realclick 模式、`ctx-isolate.mjs` 仍是自写客户端，开了 `Page.enable` 却不处理弹窗（坑 62 已写明风险）。
+
 ## 2026-10-14（第三轮 · 用户指定的性能/实用性改造，6 项全做）
 
 > 范围：审计后按用户要求实施 6 项改造（等待语义、通用 waitFor、导出内容对账、一键证据、vtable 提速、批量求值）。

@@ -6,6 +6,11 @@
     python scripts/distribute.py                           # 分发默认 skill 并逐文件 MD5 校验
     python scripts/distribute.py --skill some-other-skill  # 分发指定 skill（可多次）
 
+🔴 白名单（2026-10-14 起）：本 skill 根目录有 targets.txt 时，**只分发到其中列出的目录**（相对用户目录的 glob，
+一行一个），列出且已存在的 skills 目录即使还没装过也会装上；不在名单里的目录一律不碰（旧副本原样留着，不删）。
+要按下面的旧规则扫描全部目录，加 --all-targets。
+
+旧规则（--all-targets，或没有 targets.txt 时）：
 分发目标 = 用户目录下（深度 ≤ MAX_DEPTH）**已经装了任一待分发 skill** 的 skills 目录，
 即「装过的才更新」，不会往新的 agent 目录里铺。以下目录不是分发目标，始终排除：
   - 源目录本身（默认 ~/.claude/skills，即本脚本所在 skill 的上级目录）
@@ -137,6 +142,34 @@ def find_targets(home: Path, src: Path, skills, excludes: list[str], allow: list
     return out
 
 
+TARGETS_FILE = Path(__file__).resolve().parents[1] / "targets.txt"
+
+
+def load_allowlist():
+    """targets.txt → glob 列表（相对用户目录）；文件不存在返回 None"""
+    if not TARGETS_FILE.exists():
+        return None
+    out = []
+    for line in TARGETS_FILE.read_text(encoding="utf-8").splitlines():
+        line = line.split("#", 1)[0].strip().replace("\\", "/").strip("/")
+        if line:
+            out.append(line)
+    return out
+
+
+def allowlisted_targets(home: Path, src: Path, globs, include_skills_repo: bool) -> list[Path]:
+    """白名单模式：名单里存在的 skills 目录（不要求已装过本 skill）；源目录本身跳过"""
+    src_r = src.resolve()
+    out = set()
+    for g in globs:
+        if g == "IdeaProjects/skills" and not include_skills_repo:
+            continue
+        for d in home.glob(g):
+            if d.is_dir() and d.resolve() != src_r:
+                out.add(d)
+    return sorted(out)
+
+
 TRAILER_FILE = Path(__file__).resolve().parents[1] / ".commit-trailer"
 
 
@@ -198,6 +231,8 @@ def main() -> int:
                     help="源 skills 目录（默认本脚本所在 skill 的上级目录）")
     ap.add_argument("--home", type=Path, default=Path.home(), help="搜索根目录（默认用户目录）")
     ap.add_argument("--exclude", action="append", default=[], help="额外排除的目标 glob，可多次")
+    ap.add_argument("--all-targets", action="store_true",
+                    help="忽略 targets.txt 白名单，按旧规则扫描全部装过 skill 的目录")
     ap.add_argument("--dry-run", action="store_true", help="只列目标与冲突，不复制")
     ap.add_argument("--force", action="store_true",
                     help="目标在上次分发后被别处改过也照样覆盖（先确认那些改动不要了；新增文件仍不删）")
@@ -220,7 +255,14 @@ def main() -> int:
 
     excludes = list(ALWAYS_EXCLUDES) + ([] if args.include_repos else list(REPO_EXCLUDES)) + args.exclude
     allow = [SKILLS_REPO] if args.include_skills_repo else []
-    targets = find_targets(args.home, args.src, skills, excludes, allow)
+    globs = None if args.all_targets else load_allowlist()
+    if globs is not None:
+        targets = allowlisted_targets(args.home, args.src, globs, args.include_skills_repo)
+        targets = [t for t in targets if not any(fnmatch.fnmatch(t.as_posix(), g) for g in args.exclude)]
+        print(f"目标来源：白名单 {TARGETS_FILE.name}（{len(globs)} 条；--all-targets 改为全量扫描）")
+    else:
+        targets = find_targets(args.home, args.src, skills, excludes, allow)
+        print("目标来源：全量扫描（装过任一待分发 skill 的 skills 目录）")
     print(f"源：{args.src}")
     print(f"分发：{', '.join(skills)}")
     print(f"目标 {len(targets)} 个：")

@@ -105,6 +105,10 @@
 - **选 Selling Point = Custom 会清空 Prompt**（预期行为）→ 测「Prompt 回填 / 保留」类断言别在 Custom 之后读
 - **Style Type 按钮**文字是整词 `Lifestyle` / `Studio`；mock 卖点名形如「Mock hook N · Lifestyle」，**按 `/Lifestyle/` 子串匹配会误中卖点按钮** —— 一律整词匹配
 - **选品图片字段名是 `imgUrl`**（`selectedProduct.imgUrl`），不是 `image` / `imageUrl`
+- **来源切换（2026-10-14 起两页一致）**：按钮组 Product List / Product Image / Product URL，上方字段标题「Product Source」（无 `*`）；Creative 页旧文字 Product to Creative / Image to Creative / URL to Creative 已不存在，按旧文字找元素的脚本会 not found
+- **素材库抽屉（Select from Library，`AssetsFormDrawer`）**：Asset Tag 下拉是**虚拟滚动**，只渲染首屏选项，排在后面的不在 DOM 里（同 Ad Type 下拉）；Product Image 来源的 Source Image 库选默认预选 Content Type / Product Only（client 62 tagId 163290，列表 135 条，去掉后 1486 条），预选项排在下拉最前；Reference 区「+」是 `[data-testid=creativehub-466]`（悬停展开），菜单项 Select from Library 是 `creativehub-468` → 回归用 `creativehub-library-drawer.mjs`
+- **getTagTree 慢且波动**（实测 1.7~8 秒）、维度选项接口约 6 秒：测「打开即选中」类时序要在新页面加载后跑，时序以页面内 50ms 采样为准，别用脚本返回时间
+- **「禁用光标」截图拍不到鼠标** → 判据用 `elementFromPoint` 命中元素的 computed `cursor`（应为 `not-allowed`）+ 点击后生成请求数不变（CP-58118 AC-67，`q99` 脚本思路）
 
 - **Generate 按钮在 789px 窗口高度下在首屏以下**：找点击目标前先 `scrollIntoView`，否则「找不到目标」；Image Resize 三张结果卡一屏放不下 → 临时 `CDP_VIEWPORT=1600x1350@1`（dpr 见 SCRIPTS 坑 52）
 - **Ad Type 下拉对 `pickAdType` 重复调用会在开 / 关之间切换**：先判断是否已展开；搜索框先全选清空再输入；**Add Product 弹层还开着时下拉会被它挡住**，输入的关键字会跑进商品搜索框 → 先关弹层，并确认商品列表加载完再点商品

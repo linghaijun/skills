@@ -11,6 +11,13 @@
 //   const [a, b] = await c.evAll(["expr1", "expr2"]);             // 一次往返读多个表达式（省往返、少中间态）
 //   const s = await c.settle({ idleMs: 500, quietMs: 400 });      // 等网络静默 + DOM 静默（取代 sleep 猜时长 / 遮罩误判）
 //   const off = c.on(msg => ...);  off();     // 订阅 / 取消订阅 CDP 事件（Network.* 等）
+//   await c.clickEl(`document.querySelector(".x")`); // 按元素真点击：先滚进视口 + 遮挡检查（被挡住抛 code="occluded"，带命中链；{force:true} 照点）
+//   await c.fill(".el-input input", "abc");   // 填输入框：真键盘全选 + insertText + 补 input/change + 读回（返回 ok/value）
+//   await c.setFiles(`"input[type=file]"`, ["a.png"]);  // 给 file input 设文件（el-upload 会自动上传 = 写操作，需授权）
+//   c.pendingDialog(); await c.handleDialog(true);      // 原生弹窗：弹出时 Runtime/Input 调用立即报错（不再白等 30s），处理后继续（坑 62）
+//   c.isFrozen(); await c.rescue();           // 连接前就被弹窗冻住的页面：连接时探活发现 → 报错不白等；rescue = 重新导航到当前 URL
+//   c.close();                                 // 还有未处理弹窗时会先自动「取消」它再断开（否则弹窗成孤儿、标签冻死）
+//   c.ev 报错带「第几行第几列 + 该行代码」；顶层写了 return 会自动包成 async 函数再跑
 //   c.close();
 //
 // CLI 脚本想保留 --port/--target/--match/--index 旧参数：connect(cliTargetOpts()) 即可（命令行实参优先于环境变量）。
@@ -41,6 +48,8 @@ export const DEFAULT_MATCH = "localhost";
 // 最小化窗口截图前恢复成什么状态：默认 maximized（启动命令带 --start-maximized），可用 CDP_RESTORE_STATE=normal 覆盖
 export const RESTORE_STATE = process.env.CDP_RESTORE_STATE || "maximized";
 export const SEND_TIMEOUT = Number(process.env.CDP_SEND_TIMEOUT || 30000);
+// 连接时探活的超时：页面 JS 这么久不回就当冻结（多半是孤儿原生弹窗，坑 62）
+export const PROBE_MS = Number(process.env.CDP_PROBE_MS || 2000);
 
 // 找一个可用的 Python（annotate.py / compose.py 等画图脚本要用）。顺序（2026-10-14 实测调整）：
 //   显式传入 > DSH_PYTHON > **dsh 运行时自带** > LOCALAPPDATA 下的 Python3xx > PATH 上的 py / python。
@@ -108,24 +117,98 @@ export async function resolvePage(opts = {}) {
   return pickPage(await listPages(opts.port || PORT), opts);
 }
 
+// 窗口标记（取自 browser-harness 的标签马头标记）：把 sessionStorage.__cdp_mark（tab-open.mjs --name 写入）作为「[g1] 」前缀补到标题上，
+// 并挂一个观察器，SPA 路由改标题后自动补回。sessionStorage 跟着标签走、reload 不丢；跨域跳转（如登录页）会丢，回来后再 tab-open --mark 一次。
+// 截图只截页面内容、不截标签栏，所以不进证据图。
+export const TAB_MARK_JS = `(() => {
+  try {
+    const m = sessionStorage.getItem("__cdp_mark");
+    if (!m) return null;
+    const p = "[" + m + "]";
+    const fix = () => {
+      const cur = sessionStorage.getItem("__cdp_mark");
+      if (!cur) return;
+      const pp = "[" + cur + "]";
+      let t = (document.title || "").trim();     // Chrome 会把标题首尾空白去掉：空标题加前缀后读回是「[g1]」不是「[g1] 」
+      if (t === pp || t.startsWith(pp + " ")) return;
+      // 只剥我们自己加过的前缀（改名前的旧标记），页面自己以「[」开头的标题原样保留
+      const prev = sessionStorage.getItem("__cdp_mark_prev");
+      for (const q of prev ? ["[" + prev + "]"] : []) if (t === q || t.startsWith(q + " ")) t = t.slice(q.length).trim();
+      document.title = t ? pp + " " + t : pp;
+    };
+    fix();
+    if (!window.__cdpMarkObs && document.head) {
+      window.__cdpMarkObs = new MutationObserver(fix);
+      window.__cdpMarkObs.observe(document.head, { childList: true, subtree: true, characterData: true });
+    }
+    return document.title;
+  } catch (e) { return null; }
+})()`;
+
 export async function connect(opts = {}) {
   const { hardCap = false } = opts;
   const page = await resolvePage(opts);
   const ws = new WebSocket(page.webSocketDebuggerUrl);
   let id = 1; const pend = new Map(); const listeners = new Set();
+  // 原生弹窗（alert / confirm / prompt / beforeunload）：弹出后页面 JS 冻结，Runtime.* / Input.* 不会返回 —— 以前表现为「ev 等满 30s 超时、像卡死」（坑 62）。
+  // 现在：连接时 Page.enable 订阅 javascriptDialogOpening；弹出瞬间把挂起的 Runtime/Input 调用立即拒绝，之后的调用直接快速失败，错误里带弹窗类型和文案。
+  let dialog = null;
+  const DIALOG_BLOCKED = /^(Runtime|Input)\./;
+  const dialogErr = (d) => {
+    const e = new Error(`原生弹窗未处理（${d.type}）：「${String(d.message || "").slice(0, 200)}」—— 页面 JS 已冻结，先 c.handleDialog(true 确定 / false 取消)（坑 62）`);
+    e.code = "dialog"; e.dialog = d; return e;
+  };
+  // 页面冻结（连接前就有弹窗）：2026-10-14 真机实测 —— 弹窗归「它弹出时开着 Page 域的那条连接」，那条连接断了弹窗就成了孤儿：
+  // 新连接 Page.enable **不会重发** javascriptDialogOpening，Page.handleJavaScriptDialog 报「No dialog is showing」，Runtime.* 全部挂住
+  // （旧行为：connect 本身要 38s，之后每次 ev 再等 30s）。现在 connect 先用 Runtime.evaluate("1") 探活，不通就标 frozen、Runtime/Input 立即报错。
+  let frozen = false;
+  const frozenErr = () => {
+    const e = new Error("页面 JS 无响应（多半是上一条连接留下的原生弹窗：新连接收不到也关不掉）→ 让用户在窗口里点掉，或 await c.rescue()（重新导航到当前 URL，会丢未保存状态）（坑 62）");
+    e.code = "frozen"; return e;
+  };
   ws.addEventListener("message", (ev) => {
     const m = JSON.parse(ev.data);
-    if (m.id && pend.has(m.id)) { const p = pend.get(m.id); pend.delete(m.id); m.error ? p.reject(new Error(JSON.stringify(m.error))) : p.resolve(m.result); }
-    else if (m.method) for (const fn of [...listeners]) { try { fn(m); } catch (e) { console.error("listener error " + e.message); } }
+    if (m.id && pend.has(m.id)) { const p = pend.get(m.id); pend.delete(m.id); m.error ? p.reject(new Error(JSON.stringify(m.error))) : p.resolve(m.result); return; }
+    if (m.method === "Page.javascriptDialogOpening") {
+      dialog = { ...m.params, at: Date.now() };
+      for (const [k, p] of [...pend]) if (DIALOG_BLOCKED.test(p.method)) { pend.delete(k); p.reject(dialogErr(dialog)); }
+    } else if (m.method === "Page.javascriptDialogClosed") dialog = null;
+    if (m.method) for (const fn of [...listeners]) { try { fn(m); } catch (e) { console.error("listener error " + e.message); } }
   });
   const send = (method, params = {}, to = SEND_TIMEOUT) => new Promise((res, rej) => {
+    if (dialog && DIALOG_BLOCKED.test(method)) return rej(dialogErr(dialog));
+    if (frozen && DIALOG_BLOCKED.test(method)) return rej(frozenErr());
     const lim = hardCap ? Math.min(to, SEND_TIMEOUT) : to;
-    const i = id++; pend.set(i, { resolve: res, reject: rej });
+    const i = id++; pend.set(i, { resolve: res, reject: rej, method });
     ws.send(JSON.stringify({ id: i, method, params }));
     setTimeout(() => { if (pend.has(i)) { pend.delete(i); rej(new Error("timeout " + method + " (" + lim + "ms)")); } }, lim).unref();
   });
   await new Promise((r, j) => { ws.addEventListener("open", r, { once: true }); ws.addEventListener("error", j, { once: true }); });
-  await send("Emulation.setFocusEmulationEnabled", { enabled: true }).catch(() => {});
+  const alive = await send("Runtime.evaluate", { expression: "1", returnByValue: true }, PROBE_MS).then(() => true, () => false);
+  if (!alive) { frozen = true; console.error("⚠ " + frozenErr().message); }
+  const init = async () => {
+    await send("Page.enable", {}, 5000).catch(() => {});
+    await send("Emulation.setFocusEmulationEnabled", { enabled: true }, 5000).catch(() => {});
+    // 窗口标记（tab-open.mjs --name 写进 sessionStorage）：每次连接补一次，reload / 路由改标题后也能恢复「[g1] 」前缀；CDP_TAB_MARK=0 关闭
+    if (process.env.CDP_TAB_MARK !== "0") await send("Runtime.evaluate", { expression: TAB_MARK_JS, returnByValue: true }, 3000).catch(() => {});
+  };
+  if (!frozen) await init();
+  // 救冻结页面：重新导航到连接时的 URL（Page.navigate 在页面冻结时照样生效，实测 31ms），再补做连接初始化
+  const rescue = async () => {
+    await send("Page.navigate", { url: page.url }, 10000);
+    frozen = false; dialog = null;
+    await new Promise((r) => setTimeout(r, 800));
+    await init();
+    return page.url;
+  };
+  const isFrozen = () => frozen;
+  const pendingDialog = () => dialog;
+  const handleDialog = async (accept = true, promptText) => {
+    const d = dialog;
+    await send("Page.handleJavaScriptDialog", { accept, ...(promptText != null ? { promptText } : {}) }, 5000);
+    dialog = null;
+    return d;
+  };
   const vp = process.env.CDP_VIEWPORT;
   if (vp) {
     const [w, h, dpr] = vp === "wide" ? [3600, 1300, 1] : vp.split(/[x@]/).map(Number);
@@ -135,13 +218,126 @@ export async function connect(opts = {}) {
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const on = (fn) => { listeners.add(fn); return () => listeners.delete(fn); };
   const off = (fn) => listeners.delete(fn);
+  // 页面异常 → 一行可读错误：异常描述 + 第几行第几列 + 出错那一行（以前是 600 字符 JSON，要人肉找位置）
+  const fmtExc = (d, expr) => {
+    const ex = d.exception || {};
+    const desc = String(ex.description || (ex.value !== undefined ? ex.value : "") || d.text || "页面异常").split("\n").slice(0, 2).join(" | ");
+    const lines = String(expr).split("\n");
+    const hasLoc = d.lineNumber != null && lines[d.lineNumber] != null;
+    const loc = hasLoc ? ` @ 第 ${d.lineNumber + 1} 行第 ${(d.columnNumber || 0) + 1} 列` : "";
+    const near = hasLoc ? `；该行：${lines[d.lineNumber].trim().slice(0, 160)}` : `；表达式：${String(expr).trim().split("\n").join(" ").slice(0, 160)}`;
+    const e = new Error("PAGE EXCEPTION" + loc + ": " + desc.slice(0, 400) + near);
+    e.exceptionDetails = d; return e;
+  };
   const ev = async (expr, to = SEND_TIMEOUT) => {
-    const r = await send("Runtime.evaluate", { expression: expr, returnByValue: true, awaitPromise: true, userGesture: true }, to);
-    if (r.exceptionDetails) throw new Error("PAGE EXCEPTION: " + JSON.stringify(r.exceptionDetails.exception || r.exceptionDetails).slice(0, 600));
+    let r = await send("Runtime.evaluate", { expression: expr, returnByValue: true, awaitPromise: true, userGesture: true }, to);
+    // 顶层写了 return / await（「const a = …; return a」这种函数体写法）→ 自动包一层 async 函数再跑一次（取自 browser-harness 的 js()）
+    // 注意：包裹后只有写了 return 才有返回值；纯表达式本来就能直接求值，不会走到这里
+    if (r.exceptionDetails && /Illegal return statement|await is only valid/.test(JSON.stringify(r.exceptionDetails))) {
+      const wrapped = "(async () => {\n" + expr + "\n})()";
+      r = await send("Runtime.evaluate", { expression: wrapped, returnByValue: true, awaitPromise: true, userGesture: true }, to);
+      if (r.exceptionDetails) throw fmtExc({ ...r.exceptionDetails, lineNumber: r.exceptionDetails.lineNumber != null ? r.exceptionDetails.lineNumber - 1 : null }, expr);
+      return r.result.value;
+    }
+    if (r.exceptionDetails) throw fmtExc(r.exceptionDetails, expr);
     return r.result.value;
   };
   const click = async (p) => { for (const type of ["mouseMoved", "mousePressed", "mouseReleased"]) await send("Input.dispatchMouseEvent", { type, x: p.x, y: p.y, button: "left", clickCount: 1 }); };
   const key = async (k, code = k, vk = 0) => { for (const type of ["keyDown", "keyUp"]) await send("Input.dispatchKeyEvent", { type, key: k, code, windowsVirtualKeyCode: vk }); };
+
+  // 按元素真点击（坑 4 / 43 / 63）：expr 返回 Element（或 CSS 选择器字符串）→ 不在视口就 scrollIntoView →
+  // 取元素在视口内最大的可见矩形中心 → elementFromPoint 查命中：命中的是目标 / 其子孙 / 其祖先 / 关联 label 才点，
+  // 否则抛 code="occluded"（带命中元素链），**不**像 browser-use 那样偷偷退回 JS click（验收要的是如实失败）。force:true 照点不误。
+  const clickEl = async (expr, { force = false, hoverMs = 120, dbl = false, scroll = true } = {}) => {
+    const info = await ev(`(() => {
+      let t = (${expr});
+      if (typeof t === "string") t = document.querySelector(t);
+      if (!t || !t.getBoundingClientRect) return { err: "not-element", got: String(t).slice(0, 80) };
+      if (t.isConnected === false) return { err: "detached" };
+      const W = innerWidth, H = innerHeight;
+      const desc = (e) => !e ? null : e.tagName.toLowerCase() + (e.id ? "#" + e.id : "") + (typeof e.className === "string" && e.className.trim() ? "." + e.className.trim().split(" ").filter(Boolean).slice(0, 2).join(".") : "");
+      let r = t.getBoundingClientRect(), scrolled = false;
+      const fully = r.width > 0 && r.height > 0 && r.left >= 0 && r.top >= 0 && r.right <= W && r.bottom <= H;
+      if (${scroll ? "true" : "false"} && !fully) { t.scrollIntoView({ block: "center", inline: "center", behavior: "instant" }); scrolled = true; }
+      const rects = t.getClientRects ? [...t.getClientRects()] : [t.getBoundingClientRect()];
+      let best = null, area = 0;
+      for (const q of rects) {
+        const x1 = Math.max(0, q.left), y1 = Math.max(0, q.top), x2 = Math.min(W, q.right), y2 = Math.min(H, q.bottom);
+        if (x2 > x1 && y2 > y1 && (x2 - x1) * (y2 - y1) > area) { area = (x2 - x1) * (y2 - y1); best = { x: (x1 + x2) / 2, y: (y1 + y2) / 2 }; }
+      }
+      if (!best) return { err: "zero-size-or-offscreen", tag: desc(t), scrolled };
+      const hit = document.elementFromPoint(best.x, best.y);
+      const chain = []; for (let e = hit, k = 0; e && k < 5; e = e.parentElement, k++) chain.push(desc(e));
+      let ok = !!hit && (hit === t || t.contains(hit) || hit.contains(t));
+      if (!ok && hit) {
+        const lab = hit.closest ? hit.closest("label") : null;
+        if (lab && (lab.contains(t) || (t.id && lab.htmlFor === t.id))) ok = true;
+        if (t.tagName === "LABEL" && t.htmlFor && hit.id === t.htmlFor) ok = true;
+      }
+      return { x: Math.round(best.x), y: Math.round(best.y), tag: desc(t), text: String(t.innerText || t.value || "").trim().split(String.fromCharCode(10)).join(" ").slice(0, 60), scrolled, ok, hit: chain };
+    })()`);
+    if (info.err) { const e = new Error(`clickEl: ${info.err} ${JSON.stringify(info)}`); e.code = info.err; e.info = info; throw e; }
+    if (!info.ok && !force) {
+      const e = new Error(`clickEl: 目标 ${info.tag} 在 (${info.x},${info.y}) 被挡住，命中的是 ${info.hit.join(" < ")}（遮罩 / 弹层 / 抽屉？等它消失再点，确认无误才 force）`);
+      e.code = "occluded"; e.info = info; throw e;
+    }
+    await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: info.x, y: info.y, button: "none", clickCount: 0 });
+    if (hoverMs) await sleep(hoverMs);
+    for (const n of dbl ? [1, 2] : [1]) {
+      await send("Input.dispatchMouseEvent", { type: "mousePressed", x: info.x, y: info.y, button: "left", buttons: 1, clickCount: n });
+      await sleep(50);
+      await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: info.x, y: info.y, button: "left", buttons: 0, clickCount: n });
+    }
+    return { ...info, forced: !info.ok };
+  };
+
+  // 往输入框填值（Vue v-model / PacvueInput / el-input）：focus → 真键盘全选（必须带 commands:["selectAll"]，
+  // 直接发 Ctrl+A 会多出 char 事件、清不掉 —— 取自 browser-harness fill_input）→ Backspace → Input.insertText → 补派 input / change → 读回。
+  // sel 命中的是包裹层（.el-input）时自动取里面的 input / textarea。返回 {ok, value, before}；ok=false 表示读回值不等于期望，别当成已填好（坑 28）。
+  const fill = async (sel, text, { clear = true, change = true, nth = 0 } = {}) => {
+    const pre = await ev(`(() => {
+      const vis = [...document.querySelectorAll(${JSON.stringify(sel)})].filter((e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; });
+      const e0 = vis[${Number(nth) || 0}];
+      if (!e0) return { err: "not-found", visible: vis.length };
+      const e = e0.matches && e0.matches("input,textarea,[contenteditable]") ? e0 : (e0.querySelector && e0.querySelector("input,textarea")) || e0;
+      e.scrollIntoView({ block: "center", behavior: "instant" });
+      e.focus();
+      window.__cdpFillEl = e;
+      return { tag: e.tagName, before: e.value != null ? e.value : e.textContent, focused: document.activeElement === e };
+    })()`);
+    if (pre.err) { const e = new Error(`fill: ${sel} ${pre.err}（可见 ${pre.visible} 个）`); e.code = pre.err; throw e; }
+    const readBack = () => ev(`(() => { const e = window.__cdpFillEl; return e ? (e.value != null ? e.value : e.textContent) : null; })()`);
+    if (clear) {
+      const mod = /Mac/.test(String(await ev("navigator.platform").catch(() => ""))) ? 4 : 2;
+      const sa = { key: "a", code: "KeyA", modifiers: mod, windowsVirtualKeyCode: 65, nativeVirtualKeyCode: 65 };
+      await send("Input.dispatchKeyEvent", { type: "rawKeyDown", ...sa, commands: ["selectAll"] });
+      await send("Input.dispatchKeyEvent", { type: "keyUp", ...sa });
+      const backspace = async () => { for (const type of ["rawKeyDown", "keyUp"]) await send("Input.dispatchKeyEvent", { type, key: "Backspace", code: "Backspace", windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 8 }); };
+      await backspace();
+      if (await readBack()) { await ev(`(() => { const e = window.__cdpFillEl; if (e && e.select) e.select(); })()`); await backspace(); } // 全选没生效（个别组件拦了快捷键）→ 退回 el.select()
+    }
+    if (text) await send("Input.insertText", { text: String(text) });
+    await ev(`(() => { const e = window.__cdpFillEl; if (!e) return; e.dispatchEvent(new Event("input", { bubbles: true })); ${change ? `e.dispatchEvent(new Event("change", { bubbles: true }));` : ""} })()`);
+    const value = await readBack();
+    const want = clear ? String(text) : String(pre.before || "") + String(text);
+    return { ok: value === want, value, before: pre.before, tag: pre.tag };
+  };
+
+  // 给 <input type=file> 设文件（DOM.setFileInputFiles，隐藏的 el-upload input 也行）。expr 返回 Element 或 CSS 选择器字符串。
+  // 🔴 el-upload 多为 auto-upload：设完就会发上传请求 = 写操作，需用户本轮授权。返回读回的 {n, names}。
+  const setFiles = async (expr, files) => {
+    const abs = [].concat(files).map((f) => path.resolve(f));
+    for (const f of abs) if (!fs.existsSync(f)) throw new Error("setFiles: 文件不存在 " + f);
+    const r = await send("Runtime.evaluate", { expression: `(() => { let e = (${expr}); if (typeof e === "string") e = document.querySelector(e); return e; })()`, returnByValue: false });
+    if (r.exceptionDetails) throw fmtExc(r.exceptionDetails, expr);
+    const oid = r.result && r.result.objectId;
+    if (!oid || r.result.subtype !== "node") throw new Error("setFiles: 表达式没返回元素 " + JSON.stringify(r.result).slice(0, 120));
+    try {
+      await send("DOM.setFileInputFiles", { files: abs, objectId: oid });
+      const back = await send("Runtime.callFunctionOn", { objectId: oid, returnByValue: true, functionDeclaration: "function () { return { tag: this.tagName, type: this.type, n: this.files ? this.files.length : -1, names: this.files ? Array.from(this.files).map((f) => f.name) : [] }; }" });
+      return back.result.value;
+    } finally { send("Runtime.releaseObject", { objectId: oid }).catch(() => {}); }
+  };
 
   // 截图（2026-10-13 实测，「不打扰用户优先」，坑 50）：
   //   1. 先直接 captureScreenshot —— 被挡住 / 后台 / 最小化都能截（4 个防后台参数 + 本连接焦点模拟；最小化实测 18/18 成功，单张 0.1~3s）
@@ -298,5 +494,14 @@ export async function connect(opts = {}) {
     return { same, before, after };
   };
 
-  return { page, ws, send, ev, on, off, sleep, click, key, shot, winState, waitStable, snapSame, waitFor, evAll, settle, close: () => { try { ws.close(); } catch {} } };
+  // 关连接时还有没处理的原生弹窗 → 自动「取消」（alert 无副作用；confirm / beforeunload 取消 = 不执行 / 留在页面，最保守），
+  // 否则它会变成孤儿，把这个标签冻住，后面所有连接都收不到也关不掉（见上方 frozen 说明）
+  const close = () => {
+    if (dialog) {
+      console.error(`⚠ 关闭连接时还有未处理的原生弹窗（${dialog.type}「${String(dialog.message || "").slice(0, 60)}」）→ 已自动取消，避免把标签冻住`);
+      return send("Page.handleJavaScriptDialog", { accept: false }, 3000).catch(() => {}).finally(() => { dialog = null; try { ws.close(); } catch {} });
+    }
+    try { ws.close(); } catch {}
+  };
+  return { page, ws, send, ev, on, off, sleep, click, clickEl, fill, setFiles, pendingDialog, handleDialog, rescue, isFrozen, key, shot, winState, waitStable, snapSame, waitFor, evAll, settle, close };
 }

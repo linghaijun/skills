@@ -78,7 +78,7 @@ description: "14-step fullstack dev workflow (Q&A→SPEC→Checklist→Plan→DD
 | 10 | 逐条编码（后端+前端；复用+非功能落点；禁单测；**禁 git**） | tasks.md | 前后端生产代码 | `step-10-coding.md` |
 | 11 | 后端单测（前端不写测试）+编译自愈+逻辑自检+浏览器实机验证（可选）+**数据核对**+**证据按 AC 归档**+证据终验（**禁 git**） | 业务代码+测试矩阵+API文档+日志 | 全 Pass 后端单测 + Step 11-业务逻辑自检报告 +（可选）浏览器验证步骤 / 实机验证报告 + **`tests/AC-NN/` 四件套 + `tests/README.md` + `tests/.verify-state.json` + 验证进度看板** | `step-11-test-debug.md` |
 | 12 | AI Review（合规 A~F + **缺陷猎捕 G** + lessons）（**禁 git**） | Step3/6/8文档+Step10/11代码 | Step 12-AI Review报告 | `step-12-ai-review.md` |
-| 13 | 全局一致性审查+交付收尾（**唯一允许 git 提交**） | Steps1~12 全部产出物 | Step 13-全局一致性审查报告 + **证据验收报告**（独立 subagent）+ **测试交接文档** + 提交 | `step-13-global-consistency-review.md`、`evidence-acceptance.md`、`test-handover.md` |
+| 13 | 全局一致性审查+交付收尾（**唯一允许 git 提交**） | Steps1~12 全部产出物 | Step 13-全局一致性审查报告 + **证据验收报告**（独立 subagent）+ **测试交接文档** + **Step 13-多语言新增key清单**（末尾，`scripts/i18n_new_keys.py`） + 提交 | `step-13-global-consistency-review.md`、`evidence-acceptance.md`、`test-handover.md` |
 | 14 | **AC ↔ Subtask 匹配与提测**（与验证态分离） | Checklist 全量 AC + 父票 Sub-task | `Step 14-AC-Subtask映射.md` + `.handover-state.json`（终态 `已提测` / `无需提测`）；确认提测则 Jira→Testing 并转交项目 `AGENTS.md` 约定的提测转交人 | `step-14-ac-subtask-handover.md` |
 
 ## 其他 reference（何时读）
@@ -91,6 +91,7 @@ description: "14-step fullstack dev workflow (Q&A→SPEC→Checklist→Plan→DD
 - `step-14-ac-subtask-handover.md` — AC↔Subtask 匹配、独立提测状态、Jira Testing + 转交。Step14 必读
 - `bug-hunting-checklist.md` — 缺陷猎捕清单（问「什么输入下会错」）。Step12 维度 G 必读
 - `figma-ui-cache.md` — Figma 设计稿缓存（`FIGMA_API_KEY` 直调 REST）。用户给 Figma 链接、Step7 设计前、Step10 前端编码前读
+- `doc-sources.md` — **需求源文档跟踪**（GitHub / Confluence 上的 PRD 等）：登记、每天首次处理需求时 `check --daily`、版本快照 + 差异、变更后的影响分析与用户裁决。用户给文档链接、说「检查文档更新」时读
 - `lessons-learned.md` — 经验教训库，每步前对照相关 lesson ｜ `lesson-harvest.md` — 经验沉淀，Step14 提测终态之后必读（见下）
 - `context-compaction.md` — **上下文压缩时机**（仅支持 `/compact` 的 agent，如 Claude Code）：安全点 + 上下文重才建议、绝不在步骤中途、先落盘再压、压缩后三件事与续跑 hook。每步收尾时对照
 - `subagent-acceleration.md` — **子 agent 加速**：派不派的三问、按步骤推荐用法与并发上限、绝不委派清单、brief 六项、结果抽检。准备并行 / 委派前读
@@ -115,6 +116,7 @@ Step14 提测终态落定后做**经验沉淀**：四道准入（代价闸 → �
 | `checklist_jira.py` | Step3 每次改 Checklist 后 |
 | `annotate.js` | Step3 出标注截图时 |
 | `figma_cache.py` | 用户给 Figma 链接时；设计稿更新后 `--refresh` |
+| `doc_sources.py` | 用户给 PRD 等文档的 GitHub / Confluence 链接时 `add`；**每天第一次处理需求时 `check --daily`**；用户要求检查文档更新时 `check` |
 | `validate_step.py` | **每步产出后、Review 之前** `--step N --record`；中断后 `--status`；改完 skill `--self-check` |
 | `verify_state.py` | 11.4 每条 AC `claim` / `fix` / `finish`、改代码后 `invalidate`；11.6 `final` 终验（登记后自动刷新看板） |
 | `surefire_aggregate.py` | 引用单测作为 AC 证据时 |
@@ -132,6 +134,7 @@ Step14 提测终态落定后做**经验沉淀**：四道准入（代价闸 → �
 0. **Step1 之前**在**后端仓根**跑 `py scripts/preflight.py --project <后端仓根>`（默认 `.` 会体检错的仓，且在旧版里会顺手建出一棵 `docs/develop`），有 BLOCK 项先修；续跑场景先 `validate_step.py --status` 拿断点
 1. 启动时 Read `doc-output-and-context.md`；用户给 Jira 号 → MCP 取 summary/Sprint → 跑 `scripts/init_workdir.py --project <后端仓根>` **自动建（或复用）需求目录**，不让用户手建（Epic 号先问做哪张 Story）
 1.5 看板**一律用服务模式打开**（静态打开不能保存 / 归档，内容也不实时）：先探测 `http://127.0.0.1:8787/api/ping`，通 = 常驻服务已在（本机开机自启：`docs/develop/tools/dashboard_server.py`，内部即本 skill 的看板服务）；不通再起 `verify_dashboard.py --all --develop docs/develop --serve --port 8787`（🔴 相对路径以**后端仓根**为基准；该命令默认还会开 `0.0.0.0:8786` 的局域网「产品确认」页，不需要时加 `--pm-port 0`）。🔴 **每次开始任务（首次启动、续跑、新会话接手）的第一条回复就输出看板地址**，写成可点击的 markdown 链接：总览 `http://127.0.0.1:8787/`，需求详情 `http://127.0.0.1:8787/index.html#/<URL 编码后的需求目录>`（目录名含中文和空格，必须编码，否则链接点不开）；每个阻塞门控汇报末尾再附一行详情链接；**每步开始前跑 `qa_record.py changes`**，有看板改动先跟用户逐条确认、同步下游、`ack` 后再继续
+1.6 📄 需求目录有 `源文档/sources.json` 时，**每天第一次处理该需求**先跑 `doc_sources.py check --dir <需求目录> --daily`（当天再调是空操作）；用户说「检查文档有没有更新」时跑不带 `--daily` 的 `check`。有 `changed` / `pending` 按 `doc-sources.md` 处理（变更必须做影响分析并交用户裁决，不能只报「变了」），处理完再继续原任务
 2. 进入第 N 步前 Read 对应 `step-NN-*.md`，严格按其中约束执行
 2.5 ⚡ 每步开工前判断本步有没有可并行的独立大块（多仓取证、按组编码、按 AC 组验证 / 对账、按维度 Review）→ 按 `subagent-acceleration.md` 三问决定是否派子 agent；**小活自己做，门控与写授权永不委派**
 3. 每步产出前对照 `lessons-learned.md` 该步相关 lesson 自检

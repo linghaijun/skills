@@ -114,6 +114,23 @@ F.证据验收（独立 subagent，明细见《Step 13-证据验收报告.md》�
 
 **提交后**：汇报各仓 commit hash，提醒后续（前端联调/部署/PR）。
 
+## 13.末 多语言新增 key 清单（本步最后一项产出，提交之后、Step14 之前）
+
+> 前端改了文案就会新增 `$t()` key。没人整理，本地化不知道要补词，中 / 日文界面就一直显示英文原文；
+> 更糟的是用了**线上翻译库里不存在的编码 key**（CP-58118：`cmcMid99` 只在 `backup/` 目录，页面直接显示「cmcMid99」）。
+
+1. **跑脚本生成骨架**（只读，不改仓库）：
+   ```bash
+   python scripts/i18n_new_keys.py --repo <前端仓库> --base <本需求分支起点 commit>        --langs <翻译库目录> [--langs <公共翻译库目录>] --out "<需求目录>/Step 13-多语言新增key清单.md"
+   ```
+   - creative-management-all：`--repo vuen-crossretail/packages/creativehub --langs vuen-crossretail/packages/langs --langs vuen-crossretail/packages/langsCommon`
+   - `--base` 用本分支第一个提交的父提交（`git merge-base HEAD <主干>` 或分支创建点）
+2. **退出码 2 = 有线上不存在的编码 key**（第 3 节）：这是缺陷，改用已上线且三种语言齐全的 key 后再提交，不交给本地化
+3. **补全第 1 节的「建议中文 / 建议日文 / 备注」**：标明仅供参考；替换了**原本已翻译** key 的地方写进第 5 节风险（补词前中 / 日文会退回英文）；翻译库里别的模块已有同文案的编码 key，不跨模块复用，注明即可
+4. 没有新增 key 也要生成（各节写「无」），门禁按文件存在判
+5. 《测试交接文档》「已知限制」写一行指向本清单；看板「多语言」页签自动读取本文件，可复制 / 导出 .md / .csv 交本地化
+6. 翻译库是 localization 仓库的 subtree 时，**前端不手改 langs**，补词在 localization 仓库做
+
 ## 审查终止条件
 - **所有检查项 ✅** → 进入交付收尾（提交）
 - **存在 ❌ 项** → 修复后重新执行本步（重新审查 + 再提交）

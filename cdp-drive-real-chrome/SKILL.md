@@ -65,7 +65,10 @@ agent_created: true
 - 🔴 **不抢前台**：启动带 4 个防后台参数后被挡住也能截图 / 点击；`bringToFront` 只在截图失败时兜底；截图直接 `await c.shot(f)` 即可（内部已连截两次 + 最小化时临时恢复兜底，坑 57）；短任务中取证优先别最小化（隔次挂起，坑 57）；**禁用 `fromSurface:false`（返回白图）**（坑 50）
 
 **操作**
-- 🔴 **`el.click()` 常静默无效** → 真鼠标事件（`real-click.mjs` / `cdp.mjs --realclick` / `click-js.mjs`）；点前打印 `elementFromPoint` 命中链（坑 4、43）
+- 🔴 **`el.click()` 常静默无效** → 真鼠标事件（`real-click.mjs` / `cdp.mjs --realclick` / `clickables.mjs --click n` / `click-js.mjs`）；前三个走 `c.clickEl`，**自动滚进视口 + 点前查遮挡，被挡住退出码 4 / 5、不点**；`click-js` / `c.click({x,y})` 只有坐标，点前自己打 `elementFromPoint` 命中链（坑 4、43、63）
+- 🔴 **找不到选择器 / 元素是 div 拼的 → 先 `clickables.mjs`**（用 `getEventListeners` 认出 Vue `@click` 的 div，AX 树里没有；`--root` / `--text` 缩范围，`--click n` 按编号点）
+- 🔴 **`ev` 报「原生弹窗未处理」→ `c.handleDialog(true/false)`；报「页面 JS 无响应」= 孤儿弹窗冻住了标签 → 让用户点掉或 `c.rescue()`（会丢未保存状态，业务页先问）**；自写客户端开了 `Page.enable` 就必须处理弹窗（坑 62）
+- 填输入框用 `c.fill(sel, text)`（读回 `ok`）；塞文件用 `upload.mjs`（el-upload 自动上传 = 写操作，需授权）
 - 🔴 **点完切换类控件必须读回状态**；开关类操作要幂等（坑 28、29）
 - 🔴 **多选页签是累加器 → 先 reload 复位；改页签后必须再点 Search**（坑 6、7、8）
 - 同名 id 多份、工具栏横向溢出、`innerText` 读到隐藏元素、PacvueSelect DOM 0 命中 ≠ 没选项、AX 快照里收起的弹层照收（坑 39~44）
@@ -172,7 +175,7 @@ sleep 15
 
 - 🔴 **请用户登录前先**只读**查库定好「账号 + 数据窗口」**，缺样本的 AC 一次性列出候选账号（默认账号见项目 PAGE-NOTES）
 - 🔴 按页面状态分组；**写持久化偏好 / 写业务数据 / 前后依赖**三条红线命中任一 → 同组串行或换独立 profile 实例
-- 🔴 `tab-open.mjs --open` 开窗 → `verify_state.py claim --window cdp:9222/<targetId>` 登记 → 全组 `CDP_TARGET=<targetId>`；并发 ≤ 4
+- 🔴 `tab-open.mjs --open` 开窗（`--name g1,g2` 会把组名标进窗口标题「[g1] …」，用户和 agent 一眼分清；登录跳转后丢了就 `--mark <id> --name g1`）→ `verify_state.py claim --window cdp:9222/<targetId>` 登记 → 全组 `CDP_TARGET=<targetId>`；并发 ≤ 4
 - 🔴 子 agent brief 缺项就串扰 / 返工（targetId、禁碰窗口、禁改偏好、sconn、chk401、授权范围、证据命名、边做边落盘），完整清单在 PARALLEL.md
 - 收尾只关自己开的窗口；**默认不恢复现场**
 
@@ -187,7 +190,7 @@ node cdp.mjs --list               # 列出 page target（含 targetId）
 ```
 
 把要执行的 JS 写进独立文件（`expr.js`），**不要**塞进命令行参数，否则引号/换行极易出错。
-多步操作写成脚本 `import { connect } from "<skill>/scripts/conn.mjs"`（子 agent 用 `sconn.mjs`）；单步求值用 `ev.mjs`；陌生页面先 `ax-snap.mjs --visible` 摸结构。
+多步操作写成脚本 `import { connect } from "<skill>/scripts/conn.mjs"`（子 agent 用 `sconn.mjs`）；单步求值用 `ev.mjs`（表达式里可以直接写顶层 `return` / `await`，报错带行号）；陌生页面先 `ax-snap.mjs --visible` 摸结构、`clickables.mjs` 看能点什么。
 
 ### 4) 触发下载并拿到文件（🔴 需用户本轮授权）
 

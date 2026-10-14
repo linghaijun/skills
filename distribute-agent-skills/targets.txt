@@ -1,0 +1,18 @@
+# 分发白名单（2026-10-14 用户：本机常用的只有 dsh、trae、workbuddy、claude、cursor、opencode、qoder）
+# 一行一个 skills 目录，相对用户目录，可用 glob；# 开头为注释。存在本文件时只分发到这里列的目录，
+# 想按旧方式扫描全部装过 skill 的目录，跑 distribute.py 时加 --all-targets。
+#
+# claude：源目录 ~/.claude/skills 本身，不需要分发
+# opencode：桌面版的 skills 目录在 AppData/Roaming/ai.opencode.desktop/skills（2026-10-14 用户确认在用，纳入；
+#   此前只有 9 月的旧版 workflow、未参与分发）；~/.config/opencode 下没有 skills 目录
+# dsh：~/.dsh 下没有 skills 目录，读 ~/.claude/skills（与源同一份）或通用目录 ~/.agents/skills —— 后者在下面保留
+.cursor/skills
+.trae/skills
+.trae-cn/skills
+.workbuddy/skills
+.qoder/skills
+.qoder-cn/skills
+.agents/skills
+AppData/Roaming/ai.opencode.desktop/skills
+# 用户的 skills 仓库（--no-include-skills-repo 可关）
+IdeaProjects/skills

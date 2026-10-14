@@ -84,6 +84,7 @@ const ROW_H = Number(flag("--row-h", 40));
 const RENDER_ALL = process.argv.includes("--render-all");   // render every row at once (bypass scrolling)
 
 // ---------- minimal DOM shim ----------
+const domState = { active: null };   // document.activeElement（focus() 写入；Input.insertText / dispatchKeyEvent 作用于它）
 function makeDom() {
   const mk = (tag, opts = {}) => {
     const el = {
@@ -118,7 +119,12 @@ function makeDom() {
       },
       querySelectorAll(sel) { return walk(this).filter((e) => matches(e, sel)); },
       querySelector(sel) { return this.querySelectorAll(sel)[0] || null; },
-      scrollIntoView() {}, focus() {}, blur() {}, select() {}, click() {},
+      scrollIntoView() {}, focus() { domState.active = this; }, blur() {}, select() { this._selAll = true; }, click() {},
+      matches(sel) { return matches(this, sel); },
+      hasAttribute(k) { return k in this.attributes; },
+      dispatchEvent() { return true; },
+      get isConnected() { return true; },
+      getClientRects() { return [this.getBoundingClientRect()]; },
       closest(sel) { let c = this; while (c) { if (matches(c, sel)) return c; c = c.parentElement; } return null; },
       contains(e) { return e === this || walk(this).includes(e); },
     };
@@ -128,6 +134,7 @@ function makeDom() {
   // selector support: .cls / #id / tag / comma-separated / [class*=x]
   const one = (e, sel) => {
     sel = sel.trim();
+    if (sel === "*") return true;
     if (sel.startsWith(".")) return e._cls.has(sel.slice(1));
     if (sel.startsWith("#")) return e.id === sel.slice(1);
     if (sel.startsWith("[class*=")) return e.className.includes(sel.slice(9, -2));
@@ -148,6 +155,16 @@ function makeDom() {
     addEventListener() {}, removeEventListener() {},
     title: "fake",
     readyState: "complete",
+    get activeElement() { return domState.active || body; },
+    // 最上层 = 文档顺序里最后一个包含该点、且 display 不是 none 的元素（够测遮挡判定）
+    elementFromPoint(x, y) {
+      let top = null;
+      for (const e of [body, ...walk(body)]) {
+        const r = e._rect; if (!r || e.style.display === "none") continue;
+        if (x >= r.x && x <= r.x + r.width && y >= r.y && y <= r.y + r.height) top = e;
+      }
+      return top;
+    },
   };
   return { document, body, walk, matches };
 }
@@ -170,6 +187,8 @@ function makeSandbox(dom) {
     ResizeObserver: class { observe() {} disconnect() {} },
     fetch: async () => ({ ok: true, status: 200, json: async () => ({}) }),
     JSON, Math, Date, Object, Array, String, Number, Boolean, RegExp, Set, Map, Promise, Error, parseInt, parseFloat, isNaN,
+    Event: class { constructor(type, o = {}) { this.type = type; this.bubbles = !!o.bubbles; } },
+    __mouse: [],   // 收到的 Input.dispatchMouseEvent 类型序列（测试读它判断「点没点」）
     __dom: dom,
   };
   sandbox.window = sandbox;
@@ -291,8 +310,17 @@ if (TABLE_ROWS > 0) {
   });
 }
 
+// Optional: --cover  在最上层盖一个全屏 div.cover（模拟 loading 遮罩 / 弹层），用来测点击前的遮挡检查
+if (process.argv.includes("--cover")) {
+  const cover = dom.document.createElement("div");
+  cover.className = "cover el-loading-mask";
+  cover._rect = { x: 0, y: 0, width: 1600, height: 900 };
+  dom.body.appendChild(cover);
+}
+
 const targets = [];
 let pendingNet = null;
+let heldEval = null;   // 原生弹窗期间被冻结的 Runtime.evaluate（Page.handleJavaScriptDialog 后才回）
 
 const server = http.createServer((req, res) => {
   if (req.url.startsWith("/json/list")) {
@@ -358,15 +386,45 @@ attachWs(server, (ws) => {
             if (SET_TEXT) { dom.body.textContent = SET_TEXT; notifyMutation(); }
           }, NET_DELAY);
           return;
+        case "Input.dispatchMouseEvent":
+          sandbox.__mouse.push(params.type);
+          return reply({});
+        case "Input.dispatchKeyEvent": {
+          const ae = domState.active;
+          if (ae && (params.type === "rawKeyDown" || params.type === "keyDown")) {
+            if ((params.commands || []).some((x) => String(x).toLowerCase() === "selectall")) ae._selAll = true;
+            else if (params.key === "Backspace") { ae.value = ae._selAll ? "" : String(ae.value || "").slice(0, -1); ae._selAll = false; }
+          }
+          return reply({});
+        }
+        case "Input.insertText": {
+          const ae = domState.active;
+          if (ae) { ae.value = (ae._selAll ? "" : String(ae.value || "")) + params.text; ae._selAll = false; }
+          return reply({});
+        }
+        case "Page.handleJavaScriptDialog":
+          reply({});
+          sendEvt("Page.javascriptDialogClosed", { result: !!params.accept, userInput: params.promptText || "" });
+          if (heldEval) { const h = heldEval; heldEval = null; h(); }
+          return;
         case "Runtime.evaluate": {
           const expr = params.expression;
+          // 模拟原生弹窗：表达式里有 alert("…") → 发 javascriptDialogOpening，并把这次求值冻住到弹窗被处理
+          const am = /alert\(["']([^"']*)["']\)/.exec(expr);
+          if (am) {
+            sendEvt("Page.javascriptDialogOpening", { url: sandbox.location.href, message: am[1], type: "alert", hasBrowserHandler: false, defaultPrompt: "" });
+            heldEval = () => reply({ result: { type: "undefined" } });
+            return;
+          }
           try {
             let v = await vm.runInContext(expr, ctx, { timeout: 30000 });
             if (params.awaitPromise && v && typeof v.then === "function") v = await v;
             const value = v === undefined ? null : v;
             return reply({ result: { type: typeof value, value } });
           } catch (e) {
-            return reply({ result: { type: "undefined" }, exceptionDetails: { text: String(e && e.message), exception: { description: String((e && e.stack) || e) } } });
+            // 与真 Chrome 一样给 0 起的 lineNumber（从 vm 的 evalmachine.<anonymous>:N 里取；语法错误时取不到就不给）
+            const lm = /evalmachine\.<anonymous>:(\d+)/.exec(String(e && e.stack));
+            return reply({ result: { type: "undefined" }, exceptionDetails: { text: String(e && e.message), ...(lm ? { lineNumber: Number(lm[1]) - 1, columnNumber: 0 } : {}), exception: { description: String((e && e.stack) || e) } } });
           }
         }
         default:

@@ -85,6 +85,19 @@ def main() -> int:
             out.extend("  " + ln.strip() for ln in (keep or lines[-3:]))
         except Exception as e:  # noqa: BLE001 —— hook 不能失败
             out.append(f"  （validate_step --status 未能运行：{e}；手动跑一次拿续跑点）")
+        # 需求源文档（doc-sources.md）：今天还没检查过的来源提醒一次；只读登记表，不联网
+        try:
+            import json
+            import datetime as dt
+            reg = d / "源文档" / "sources.json"
+            if reg.exists():
+                today = dt.date.today().isoformat()
+                stale = [s["name"] for s in json.loads(reg.read_text(encoding="utf-8")).get("sources", [])
+                         if s.get("last_checked") != today]
+                if stale:
+                    out.append(f"  📄 源文档今日未检查：{', '.join(stale)} → 先跑 `doc_sources.py check --dir <需求目录> --daily`（见 doc-sources.md）")
+        except Exception:  # noqa: BLE001
+            pass
         out.append("")
     print("\n".join(out).rstrip())
     return 0

@@ -1,13 +1,13 @@
-"""Step13 末尾：整理本需求前端新增的多语言 key，生成《多语言新增key清单.md》骨架。
+"""Step13 末尾：整理本需求前端新增的多语言 key，生成《Step 13-多语言新增key清单.md》骨架。
 
 用法：
     python i18n_new_keys.py --repo <前端 git 仓库> --base <分支起点 commit / ref> \
-        --langs <翻译库目录，可多次> --out <需求目录>/多语言新增key清单.md [--locales en,zh_CN,ja]
+        --langs <翻译库目录，可多次> --out <需求目录>/Step 13-多语言新增key清单.md [--locales en,zh_CN,ja]
 
 例（creative-management-all）：
     python i18n_new_keys.py --repo vuen-crossretail/packages/creativehub --base 91e9f8c \
         --langs vuen-crossretail/packages/langs --langs vuen-crossretail/packages/langsCommon \
-        --out "creative-management/docs/develop/<需求目录>/多语言新增key清单.md"
+        --out "creative-management/docs/develop/<需求目录>/Step 13-多语言新增key清单.md"
 
 做什么：
   1. 取 `git diff <base> HEAD`（只看 .vue/.js/.ts）新增行里的 `$t("...")` / `$t('...')`，排除 base 里已经在用的 key

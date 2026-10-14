@@ -52,6 +52,7 @@ docs/develop/26Q4-Sprint1-CP-48771-share-audit/
 ├── Step 14-AC-Subtask映射.md / Step 14-mapping.json   # Step14
 ├── .workflow-state.json / .handover-state.json / .qa-changes.json   # 脚本维护的状态文件，不手改
 ├── figma/                                 # Figma 缓存（如有，figma-ui-cache.md）
+├── 源文档/                                # 需求源文档版本快照 + 差异（如有，doc-sources.md）
 ├── tests/                                 # 每 AC 证据目录（见下）
 ├── 验证进度看板.html                      # Step11.4 收尾生成（用例状态 + 证据终验，可切换实时刷新，见下）
 └── UI/ (可选)                             # UI 截图

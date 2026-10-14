@@ -40,7 +40,7 @@
 | `cdp.mjs` | CDP 单次执行：执行 JS / 截图（`--shot`）/ 真点击（`--realclick`）/ 下载目录（`--download`，目录 `--dl-dir` > `CDP_DL_DIR` > 系统临时目录 `cdp-downloads`）；`--list` 列 targetId | 一次性求值 / 排查；**默认入口** | ✅（2026-10-13 去掉写死下载目录；目标解析改用 conn.mjs 的 `pickPage`，默认 match 统一 localhost） |
 | `conn.mjs` | 🔴 **多步脚本的唯一标准连接库**：目标 `--target` > `CDP_TARGET` > `--match`/`CDP_MATCH`（默认 localhost，匹配不到报错）；所有调用默认 ≤30s 且 `unref()`；`shot` = 直接截图 ×2（不抢前台，最小化也能截）→ 仍失败且最小化则临时恢复再缩回 → bringToFront → screencast（监听用完即移除，坑 50）；`winState()` 查窗口状态；`waitStable` / `snapSame` 同帧截图；`on()` 返回取消函数 / `off()`；`CDP_VIEWPORT` 显式视口；焦点模拟；`cliTargetOpts()` 保留旧 CLI 参数；`connect({hardCap:true})` 连显式长超时也压到 30s | 自写多步脚本一律 `import { connect }`，别再各抄一份 CDP 客户端 | ✅ 2026-10-10；2026-10-13 并入 sconn 能力（语法检查通过，未实机回归） |
 | `sconn.mjs` | **= `conn.mjs` 的 `hardCap` 别名**（防卡死能力已并入 conn.mjs）；旧 `import … from sconn.mjs` 不用改 | 🔴 **子 agent / 并行窗口 / 窗口可能被遮挡时一律用它**；toast、滑入动画、抽屉截图（`waitStable` / `snapSame`） | ✅ 2026-10-13（CP-58118 AC-52/62）；同日改为别名 |
-| `real-click.mjs` | 按「选择器+可见文本」真鼠标点击；`--list` 只列候选 | 点页签/下拉项/按钮；`el.click()` 无效时 | ✅（2026-10-13 起读 `CDP_TARGET` / `CDP_PORT`） |
+| `real-click.mjs` | 按「选择器+可见文本」真鼠标点击；`--list` 只列候选；2026-10-14 起走 `c.clickEl`：**先滚进视口、点前查遮挡，被挡住退出码 4**（`--force` 照点） | 点页签/下拉项/按钮；`el.click()` 无效时 | ✅（2026-10-13 起读 `CDP_TARGET` / `CDP_PORT`；2026-10-14 遮挡检查离线 + 真机已验，坑 63） |
 | `vtable-read.js` | 虚拟滚动表格**可见区**几何归位读单元格 | 读列值、截图前定位单元格 | ✅ 16 列全归位 |
 | `vtable-scroll.mjs` | 滚动收**全量**行（可见区不够时） | 分页/滚动验证「后面有没有这条」 | ✅（2026-10-13 起读 `CDP_TARGET` / `CDP_PORT`；页面内采集默认超时 300s，`--timeout` 可改） |
 | `vue-datalayer-read.js` | 读 Vue `setupState` 行数据，`NULL/number/string` 三态 + 按分组键分组 | **分不清 `--` 是门禁还是没数据时必用** | ✅ |
@@ -51,7 +51,7 @@
 | `export-target.mjs` | **并行安全的导出**：锁 `CDP_TARGET`、页面脚本给按钮坐标、`--dir` 落盘、记录请求 / 状态码 / content-disposition | 🔴 **所有导出验证**（导出 = 下载，需用户本轮授权） | ✅ 2026-10-10 |
 | `export-click.mjs` | ⛔ **deprecated**：旧导出实现（设 1920 视口覆盖、全局选择器可能命中顶栏下载中心、不给 `CDP_TARGET` 时连第一个含 CreativeManagement 的标签 → 并行时会点到别人的窗口） | 只为旧命令不失效而保留；新用法一律 `export-target.mjs` | 2026-10-13 标 deprecated，去掉写死端口 / 下载目录 |
 | `ctx-isolate.mjs` | 多 BrowserContext 隔离自检（浏览器级连接，自带清理） | 需要账号隔离时（`PARALLEL.md` §2.5 B 方案） | ✅ |
-| `tab-open.mjs` | **并行开窗**：`--open <url> --n 3 --name g1,g2,g3` 同实例开独立窗口，输出 targetId；`--list` / `--close` | 开测前按分组表开窗、登记窗口标识 | ✅ 2026-10-10 |
+| `tab-open.mjs` | **并行开窗**：`--open <url> --n 3 --name g1,g2,g3` 同实例开独立窗口，输出 targetId；默认把分组名标进标题「[g1] …」（`--no-mark` 关；`--mark <id> --name g1` 补标）；`--list` / `--close` | 开测前按分组表开窗、登记窗口标识 | ✅ 2026-10-10；窗口标记 2026-10-14 真机已验 |
 | `fresh-entry.mjs` | **「首次进入」模拟**：离开到同源静态资源 → 删偏好 key（可备份）→ 回到页面 | AC 前置「首次进入 / 未做过配置」 | ✅ 2026-10-10 |
 | `wait-idle.mjs` | **兼容入口**：2026-10-14 起转发到 `wait-settle.mjs`（旧 CLI 与退出码不变）；旧实现只看遮罩、有「遮罩没了但旧列表还在」的误判 | 旧命令仍可用；**新代码写 `wait-settle.mjs`** | ✅ 2026-10-14（转发，实测退出码/输出兼容） |
 | `wait-settle.mjs` | 🔴 **等到「页面真的就绪」**：网络静默（事件驱动）+ DOM 静默（MutationObserver）+ 无 loading 遮罩 +（可选）行数稳定/等于预期；超时**不抛错**、回 `settled:false` + `reason`，退出码 1。库用法 `waitSettle(c, {...})` | 每次布景/切日期/点 Search 之后、读数之前；取代 `sleep(列表 20~40s)` 与只看遮罩的旧 wait-idle | ✅ 2026-10-14 离线回归 11 例（含 net-timeout / 行数不符 / CLI 退出码） |
@@ -70,6 +70,15 @@
 | `fetch-stub.mjs` | **构造证据的标准做法**：CDP Fetch 拦截指定接口 → fulfill / fail；开拦截先自检、结束 `Fetch.disable` + reload + 读回确认失效，全程落 log（标「构造（CDP Fetch）」）；`--max`（默认 600s）硬上限，Ctrl+C / SIGTERM 也走收尾 | 首帧 / 失败分支 / 超时等真实环境造不出的态（替代各写一套的 XHR 补丁） | ⚠️ 2026-10-13 由 AC-62/90/97 的拦截代码提炼，未整体回归 |
 | `ax-snap.mjs` | 无障碍树快照：`[role] name = value` 缩进文本（generic / 无名节点不占行也不占缩进；父节点 name 已含的 StaticText 碎片去掉）；🔴 **`--visible`** 用一次 DOMSnapshot 去掉不渲染 / `visibility` / `opacity:0` 的节点（El radio/checkbox 透明 input 豁免）；`--root <css>` 只看子树、`--ids` 带 `#backendNodeId`（`DOM.getBoxModel({backendNodeId})` 求坐标再真点击）、`--depth N`、`--out` 落盘只回摘要；`--full` 关掉去重 | 进陌生页面 / 弹窗 / 抽屉先摸结构、找按钮页签的可访问名；**默认加 `--visible`** | ✅ 2026-10-13：Ads 页（HTML 1.8MB）原版算法 340 行 6.7KB → 紧凑 82 行 → `--visible` 62 行 1.3KB，日历 / 日期快捷项全滤掉；`--root ".pacvue-newfilter-wrapper" --ids` → #287 换算坐标命中 Filters；GlobalReport #520 命中 Segments。test3 Ads 页有数据：HTML 644KB → `--visible` 283 行、<1s，单元格值与 `vtable-read.js` 逐格一致但**行列关系丢失**（见坑 39），表格别用它读。移植自 pasky/chrome-cdp-skill（MIT） |
 
+| `clickables.mjs` | 🔴 **可点元素编号清单 + 按编号真点击**（移植 browser-use）：`Runtime.evaluate` 带 `includeCommandLineAPI` 用 DevTools 的 `getEventListeners()` 认出 **Vue `@click` 挂在普通 div 上**的元素（AX 树里没有，坑 39），再按 `checkVisibility` + 视口 + 中心点遮挡过滤；输出 `[n] tag.class "文本" (x,y) 理由`；`--root` / `--text` / `--all`（含被挡 / 视口外，标 covered）/ `--json` / `--out`；`--click n` 点**上一次清单**的第 n 个（元素已脱离 DOM 报错让你重列）。页面代码在 `clickables-page.js` | 进陌生页面 / 弹窗 / 抽屉先「现在能点什么」；找 div 拼的菜单、页签、图标按钮（以前要现写选择器试两三轮） | ✅ 2026-10-14 离线回归 + 真机：自造页认出挂监听的 div、opacity:0 祖先下不列、遮罩下不列（--all 点名遮挡者）；AIImageOptimizer 页 1309 元素 **318ms** 列出 47 个（`div.menu-item` 左侧菜单、顶栏下载中心等 AX 树没有的都在） |
+| `upload.mjs` | 给 `<input type=file>` 设文件（`DOM.setFileInputFiles`，隐藏的 el-upload input 也行，不弹系统文件框）→ 读回 `files` 个数 / 文件名；库用法 `c.setFiles(expr, files)` | 🔴 el-upload 多为 auto-upload，设上就发上传请求 = 写操作，需用户本轮授权 | ✅ 2026-10-14 真机（自造页，中文文件名、多文件读回 n=2） |
+
+**2026-10-14 `conn.mjs` 新增（移植 browser-use / browser-harness，离线 37 例 + 真机 29 例）**：
+`c.clickEl(expr)`（滚进视口 + 遮挡检查，被挡抛 `code="occluded"` 带命中链，`{force:true}` 照点；`real-click.mjs` / `cdp.mjs --realclick` / `clickables.mjs` 都走它）、
+`c.fill(sel, text)`（真键盘全选 + `insertText` + 补 `input`/`change` + 读回 `ok`）、`c.setFiles`、
+原生弹窗 `c.pendingDialog()` / `c.handleDialog(accept)` + 冻结探活 `c.isFrozen()` / `c.rescue()`（坑 62）、
+`c.ev` 报错带行列与该行代码、顶层写 `return` / `await` 自动包成 async 函数；连接时补窗口标记（`tab-open.mjs --name` → 标题「[g1] …」）。
+
 **仍是自写 WebSocket 客户端的脚本**（不经 conn.mjs，知道就好）：`cdp.mjs`（单次 CLI；目标解析已共用 `pickPage`，超时已 `unref`）、
 `ctx-isolate.mjs` / `tab-open.mjs`（连**浏览器级** `/json/version`，不是 page；`tab-open` 的请求无超时）、`export-click.mjs`（deprecated）。
 新脚本一律 `import { connect } from conn.mjs`。
@@ -83,8 +92,11 @@
 | `real-click.mjs --sel <css> --text <文本>` | 选择器 + 可见文本（全等，折叠空白） | 页签 / 下拉项 / 按钮这类「稳定 class + 短文本」；`--list` 先列候选排查选择器 |
 | `cdp.mjs <expr.js> --realclick` | expr 返回 Element | 一次性的复杂定位（要遍历、要算） |
 | L1 `click-js.mjs <page.js>` | page.js 返回 `{x,y}`（CSS 像素） | 页面级脚本已算好坐标（如 `full-number-toggle.js`、`file-type-tab.js`）；`conn.mjs` 的 `c.click({x,y})` 是同一回事 |
+| `clickables.mjs --click n` | 上一次清单的编号 | 不知道选择器怎么写、元素是 div 拼的（2026-10-14 新增） |
 
-三者都是 `Input.dispatchMouseEvent` 真鼠标事件（坑 4）；点完一律读回状态（坑 28）。
+都是 `Input.dispatchMouseEvent` 真鼠标事件（坑 4）；点完一律读回状态（坑 28）。
+前三种里 `real-click.mjs`、`cdp.mjs --realclick`、`clickables.mjs` 走 `c.clickEl`：**先滚进视口、点前查遮挡，被挡住退出码 4 / 5 不点**（坑 63）；
+`click-js.mjs` / `c.click({x,y})` 只有坐标、不做遮挡检查，点前自己 `elementFromPoint`（坑 43）。
 
 ### 快速选型
 
@@ -110,6 +122,10 @@ toast / 滑入动画要截图          → conn.mjs / sconn.mjs 的 snapSame（�
 要验证导出文件                 → export-target.mjs（不是 export-click.mjs）
 要出带红框证据图               → (L1) cells.mjs / col-rect.mjs 导 rects → shot.mjs → 再导一次 rects（cmp 一致）→ annotate.py --rects
 进陌生页面 / 弹窗先摸结构       → ax-snap.mjs --visible（--root 缩到弹窗 / 抽屉 / .pacvue-newfilter-wrapper；见坑 39）
+「现在能点什么」/ div 拼的菜单    → clickables.mjs（--root / --text 缩范围；--click n 按编号点）
+往输入框填值                   → c.fill(sel, text)（读回 ok；别只 insertText 不读回）
+给 file input 塞文件            → upload.mjs / c.setFiles（auto-upload = 写操作，需授权）
+ev 报「原生弹窗未处理」/「页面 JS 无响应」 → c.handleDialog(true/false) / c.rescue()（坑 62）
 其它                          → cdp.mjs <你的表达式> [--target <id>]
 ```
 
@@ -130,7 +146,7 @@ toast / 滑入动画要截图          → conn.mjs / sconn.mjs 的 snapSame（�
 
 > **编号是稳定 ID，不改号**（脚本注释、其它文档按号引用）。2026-10-13 整理只调整了物理顺序（30 归位到 29 之后、16d 归位到 16c 之后、39 归入「点击 / 定位类」），
 > 从 `SKILL.md` 迁入的条目接在现有最大号 39 之后，从 **40** 起编号；另新增 16g、19a、49。没有任何旧号被改动或复用。
-> 之后按时间追加：50（2026-10-13）、51~58（2026-10-14）、59~61（2026-10-14 性能改造轮）。现有编号：0~61 连续无缺号 + 16a~16g、19a；物理顺序按类别 / 日期分节，不按号排。
+> 之后按时间追加：50（2026-10-13）、51~58（2026-10-14）、59~61（2026-10-14 性能改造轮）、62~64（2026-10-14 移植 browser-use 轮）。现有编号：0~64 连续无缺号 + 16a~16g、19a；物理顺序按类别 / 日期分节，不按号排。
 
 ### 环境类
 
@@ -227,12 +243,14 @@ toast / 滑入动画要截图          → conn.mjs / sconn.mjs 的 snapSame（�
 21. 🔴 **自写 CDP 客户端的超时 `setTimeout` 不 `unref()`，脚本结果早出来了进程还要等到超时才退**（实测每次调用多等 2 分钟，一下午白耗）。用 `conn.mjs`，或脚本末尾 `process.exit(0)`。
 22. 🔴 **正则写在模板字符串里会被吞反斜杠**：`` c.ev(`...replace(/\s+/g,' ')...`) `` 进页面时变成 `/s+/g` —— 不报错，只是把字母 s 换成空格（「Social Ads」→「Social Ad 」、`waitkpi` 永远返回 null、表头「Video\nViews」匹配不上）。
     **页面代码放独立 `.js` 文件原样注入**（`ev.mjs --file`）；必须写在模板里就写 `\\s` / `\\d`，或改 `String.fromCharCode(10)` 这类不含反斜杠的写法。
-23. 🔴 **Agent 的 Bash 工具会把命令文本里的 `\\` 折叠成 `\`**（heredoc、`sed`、`python -c` 全受影响，实测 sed 替换 0 命中、python 报 invalid escape；2026-10-13 维护本 skill 时又踩一次；2026-10-14 review 时 python heredoc 里的替换串 `\\` 被折叠、断言 0 命中，第三次）→ 含反斜杠的文件内容**用 Write / Edit 工具写**，别走 shell。页面正则改成不带反斜杠的写法见坑 51。
+23. 🔴 **Agent 的 Bash 工具会把命令文本里的 `\\` 折叠成 `\`**（2026-10-14 查明根因：折叠发生在 bash 启动**之前** —— bash 的 `/proc/$$/cmdline` 里已是折叠后文本，是 Git Bash（MSYS）拆 Windows 命令行时「每两个反斜杠折成一个」，所以单引号、`<<'EOF'` 都挡不住；单个 `\n` / `\d` 不受影响；PowerShell 工具、Write / Edit 不受影响。
+    **Claude Code 已加机器拦截**：`~/.claude/hooks/bash-backslash-guard.mjs`（`~/.claude/settings.json` 的 PreToolUse / Bash），`\\` 落在单引号串、`$'…'`、heredoc 正文里直接拒绝并提示改法；双引号 / 裸写放行（bash 自己也会折，结果一样）；确要折叠结果加注释 `# allow-backslash`。其他 agent 工具没有这个 hook，仍按本条自觉。）
+    （heredoc、`sed`、`python -c` 全受影响，实测 sed 替换 0 命中、python 报 invalid escape；2026-10-13 维护本 skill 时又踩一次；2026-10-14 review 时 python heredoc 里的替换串 `\\` 被折叠、断言 0 命中，第三次）→ 含反斜杠的文件内容**用 Write / Edit 工具写**，别走 shell。页面正则改成不带反斜杠的写法见坑 51。
 24. 🔴 **「删 localStorage → reload」模拟不了首次进入**：卸载时组件把内存配置写回，key 又带着旧值回来（实测）。用 `fresh-entry.mjs`（先离开到同源静态资源再删）。`about:blank` 不同源，访问不到目标域存储。
 25. 🔴 **`Emulation.setDeviceMetricsOverride` 不会随连接断开可靠撤销**：某次连接设了 3600 宽，之后别的连接 `clearDeviceMetricsOverride` 清不掉，页面一直是 3600（窗口本身是正常大小）。
     → 要么完全不碰视口，要么**每次连接都显式设成确定值**（`conn.mjs` 的 `CDP_VIEWPORT`）；设完读 `innerWidth` 核对。
 26. 🔴 **宽视口下弹出层坐标算错**（下拉三个选项叠在同一点，点了不生效且不报错）→ 操作下拉 / 日期面板用正常视口，截图前再切宽视口。
-27. **Python 打印中文在 Windows 控制台报 `UnicodeEncodeError`**（文件其实已写好）→ 一律 `PYTHONIOENCODING=utf-8`。
+27. **Python 打印中文在 Windows 控制台报 `UnicodeEncodeError`**（文件其实已写好）→ 一律 `PYTHONIOENCODING=utf-8`。🔴 但 `py -I` / `python -I`（隔离模式）**会忽略所有 `PYTHON*` 环境变量**，设了也照样崩（2026-10-14 实测，打印中文文件名时崩在写盘之后、下一个文件之前 → 只写了一半）→ 用 `-I` 的脚本里自己 `sys.stdout.reconfigure(encoding="utf-8")`，或打印 `ascii(name)`。
 28. **点完「切换类」控件必须读回状态**（`groupByValue`、`isShowAbbreviateNumbers`、存储值），别信脚本自己打印的「已切换」—— 实测 `gb.mjs` 两次打印「→ Asset - Ad」但分组没变。
 29. **展开 / 勾选这类开关型操作要幂等**：先判当前状态再决定点不点，盲点会把已展开的收起、已勾的取消。
 30. **按序号选标签（`--index`）在并行时不稳**：`/json/list` 顺序随标签激活变化 → 并行一律 `--target <targetId>` / `CDP_TARGET`。
@@ -303,14 +321,36 @@ toast / 滑入动画要截图          → conn.mjs / sconn.mjs 的 snapSame（�
 - `wait-idle.mjs` 转为 `wait-settle.mjs` 的转发入口（旧命令与退出码不变，遵循「废弃不删名」）。
 - 顺带修掉的真 bug：`vtable-scroll.mjs --max-rows` 之前完全不生效（坑 59）。
 
+### 2026-10-14 移植 browser-use / browser-harness 轮（7 项，离线 `run-interact.mjs` 37 例 + 真机 29 例）
+
+> 来源：browser-use `c75e847`（dom/service.py 的 getEventListeners、default_action_watchdog.py 的遮挡检查）、
+> browser-harness `dbf0e4f`（helpers.py 的 fill_input / js() / upload_file / 标签标记，interaction-skills/dialogs.md）。
+> 没搬的：常驻后台连接（要推翻「一个脚本一条连接」和 targetId 锁窗口，收益约 0.3s/次，瓶颈不在这）、被挡住就退回 JS click（验收要如实失败）、录屏 / 云浏览器。
+
+62. 🔴 **原生弹窗（alert / confirm / prompt / beforeunload）会冻结页面 JS，而且弹窗归「弹出时开着 Page 域的那条连接」**（2026-10-14 真机实测）：
+    - 本连接看得到：`conn.mjs` 连接时 `Page.enable` 订阅 `javascriptDialogOpening`，弹出瞬间把挂着的 `Runtime.*` / `Input.*` 立即拒绝（`code="dialog"`，错误里带类型和文案，实测 2ms），之后调用也直接失败；`c.handleDialog(true 确定 / false 取消)` 处理后继续。以前表现是 `ev` 等满 30s 超时、像卡死。
+    - 🔴 **那条连接一断，弹窗就成了孤儿**：新连接 `Page.enable` **不会重发**弹窗事件，`Page.handleJavaScriptDialog` 报 `No dialog is showing`，`Runtime.evaluate` 全部挂住 —— 旧 `connect()` 连这种页面要 **38s**，之后每次 `ev` 再等 30s。
+      → `connect()` 先 `Runtime.evaluate("1")` 探活（`CDP_PROBE_MS`，默认 2s），不通就标 `frozen`、`Runtime/Input` 立即报 `code="frozen"`；`c.rescue()` = `Page.navigate` 到当前 URL（冻结时照样生效，实测 31ms；会丢页面未保存状态，业务页先问用户），或让用户在窗口里点掉。
+      → `c.close()` 时还有未处理弹窗会**自动取消**再断开（alert 无副作用；confirm / beforeunload 取消 = 不执行 / 留在页面），防止留下孤儿。脚本崩溃（没走 close）仍可能留孤儿 → 下次连接会被探活发现。
+    - 自己写的 CDP 客户端（`cdp.mjs` 单次模式、`ctx-isolate` 等）开了 `Page.enable` 又不处理弹窗，同样会制造孤儿。
+63. 🔴 **点击前必须查遮挡，「点击成功」不等于点中**（坑 43 的落地；2026-10-14 前 `real-click.mjs` / `c.click` 都没做，也不先滚动）：
+    `c.clickEl` 先 `scrollIntoView`（不完全在视口内才滚），取元素在视口内**最大可见矩形**中心，`elementFromPoint` 命中的是目标 / 子孙 / 祖先 / 关联 label 才点；否则 `code="occluded"` + 命中链（如 `div.el-loading-mask < div.table-wrap`），**一个鼠标事件都不发**。
+    遇到它先等遮罩 / 弹层消失（`wait-settle.mjs`）；确认是透明装饰层盖着、点下去确实是想要的效果才 `--force` / `{force:true}`，并在证据里写明。
+64. **Windows 上 node 脚本 `ws.close()` 后立刻 `process.exit()` 会撞 libuv 断言**（`Assertion failed: !(handle->flags & UV_HANDLE_CLOSING)`，退出码 127，输出其实已打印完）：`tab-open.mjs` 加了 `markTab` 的额外连接后出现（2026-10-14）。→ 关连接后 `setTimeout(() => process.exit(code), 200)`，或让事件循环自然结束；看到 127 + 这行断言别当成脚本逻辑失败。
+65. 🔴 **Git Bash 里的 `timeout` 不是 coreutils**：PATH 先命中 Windows `C:\Windows\System32\timeout.exe`，`timeout 60 node x.mjs` 报 `ERROR: Invalid syntax. Default option is not allowed more than '1' time(s).` 且**命令根本没跑**（2026-10-14 两次）→ 超时交给调用工具的 timeout 参数，或写全路径 `/usr/bin/timeout`。
+66. 🔴 **注入页面的 JS 写在 Node 模板字符串里时，正则的 `\n` `\t` `\s` 会先被模板字符串解释**：`/[ \n\t]+/` 变成正则里夹真换行 → 页面报 `SyntaxError: Invalid regular expression: missing /`（2026-10-14）→ 模板里写 `\\s`（与 creativehub-drive 现有写法一致），或把注入代码放独立 `.js` 文件读入。
+67. **截图拍不到鼠标光标**：「悬停显示禁用光标 / 手型」类断言，判据用 `document.elementFromPoint(x, y)` 命中元素的 `getComputedStyle(el).cursor`（同时记按钮自身与外层包裹元素，禁用按钮常由外层 span 承担 cursor），再加「点击后对应请求数不变」；截图只用来标注按钮位置。
+- **`clickables.mjs` 的页面代码要包在块里注入**：`Runtime.evaluate` 顶层 `const` 会留在页面全局词法作用域，同一页面第二次列清单报 `Identifier '__OPT' has already been declared`（离线回归抓到，已修）。自写注入「前面拼一行 const 参数」的脚本同理。
+- **窗口标记**：`tab-open.mjs --open … --name g1`（默认开）把分组名写进该标签 `sessionStorage.__cdp_mark`，标题变「[g1] 原标题」，之后任何 `conn.mjs` 连接都补回（SPA 改标题、reload、同源 `rescue` 后都在，真机已验）；跨域跳转（登录页）会丢 → 回来后 `tab-open.mjs --mark <targetId> --name g1`。截图只截页面内容、不进证据；`CDP_TAB_MARK=0` / `--no-mark` 关闭。
+
 ## 维护规则
 
 - 改完 skill 脚本 → 语法自检（`node --check` / `python -m py_compile`，删掉生成的 `__pycache__/`）→ 按 **`distribute-agent-skills` skill** 分发：
   `python ~/.claude/skills/distribute-agent-skills/scripts/distribute.py --skill cdp-drive-real-chrome --dry-run` 先看目标，再去掉 `--dry-run` 正式分发（逐文件 MD5 校验，看输出不看退出码，坑 19）
 - 页面改版 → 页面级选择器失效是正常的；**要更新「最后验证」日期并重跑一次**，别留过期结论
 - 新脚本进 L0 的门槛：至少在**两个不同需求**里用过
-- 🔴 **改 `conn.mjs` / 等待逻辑 / 解析类脚本后，跑 `tests/` 里的离线回归**（假 Chrome，不碰真浏览器，92 例）：
-  `cd tests && node run-tests.mjs && node run-wait-settle.mjs && node run-l1.mjs`（全量见 `tests/README.md`）。
+- 🔴 **改 `conn.mjs` / 等待逻辑 / 解析类 / 点击类脚本后，跑 `tests/` 里的离线回归**（假 Chrome，不碰真浏览器，129 例）：
+  `cd tests && node run-tests.mjs && node run-wait-settle.mjs && node run-l1.mjs && node run-interact.mjs`（全量见 `tests/README.md`）。
   测试台在 **skill 的 `tests/`**（资产，随 skill 分发），不是 `.workbuddy/tmp/` —— 它回归的正是 L0 脚本本身。
 - 合并 / 废弃脚本时**默认不删旧文件名**（与 [`self-review.md`](self-review.md) 红线「不为变短而删」一致）：`deprecated` 只表示「别再用」，文件名一律留薄包装或转调（如 `annotate-rects.py` → `annotate.py --rects`、`compare-on.mjs` → `compare.mjs on`），文件头标 deprecated，避免外部文档里的旧命令失效。
   确实要删除时（如安全原因），先在 `REVIEW.md` 逐条写理由，并同步改掉所有引用它的文档、脚本注释与外部命令示例 —— **删之前先 grep 全仓引用**。
