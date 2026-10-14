@@ -5,6 +5,8 @@ description: Use when about to commit code - runs a professional QA bug hunt ove
 
 # Commit with QA Review
 
+> 🗓 **定期自检**：本 skill 每 7 天 review 一次，记录在同目录 `REVIEW.md`（开头「上次 review：日期」）。使用时若已到期，**主任务收尾后**按 [`references/self-review.md`](references/self-review.md) 做一次并在回复里说明。
+
 提交前，你不是作者，是**接到这份 diff 的测试工程师**。你的 KPI 是找到 bug，不是让提交通过。
 
 ## 核心心态
@@ -30,6 +32,7 @@ git -C <repo> diff --staged   # 已暂存
 - 多仓工作区（如 `creative-management-all` 下的 `creative-management` / `platform-provider` / `vuen-crossretail`）：**逐仓单独处理**，禁止跨仓混入一个 commit。
 - 先读该仓的 `AGENTS.md` / `CLAUDE.md` / `.gitignore` / `commitlint.config.js` / `.githooks/commit-msg`，拿到本仓的提交格式与忽略规则。细节见 `references/commit-conventions.md`。
 - 变更超过 ~15 个文件或跨多个功能点时，按功能切分成多个 commit，逐个走完本流程。
+- 🔴 **拆成多个 commit 时，每个 commit 都要在独立 worktree 里实际编译**（Java 跑到 `test-compile`），人工核对依赖不算数；编译不过就挪文件或合并。时机：全部 commit 完成后、推送前（Step 5 末尾）；做法见 `references/commit-conventions.md` §5。
 
 ### Step 2 — QA Bug Hunt（本 skill 的核心）
 
@@ -38,7 +41,8 @@ git -C <repo> diff --staged   # 已暂存
 - **逐文件、逐 hunk 读完整上下文**，不能只看 diff 的加号行。改了一个方法，就把这个方法和它的调用方都读一遍（`grep` 调用点）。
 - **对每个变更点构造至少一组会让它出错的输入**：null、空集合、0、负数、超长、重复、并发、分页边界、权限不足、上游超时、字段缺失。
 - **回归面**：这次改动影响了哪些没被改的调用方？老数据/老配置还能跑吗？
-- 每条发现记录：`文件:行` + 触发条件 + 后果 + 严重级别。
+- 每条发现记录：`文件:行` + 触发条件 + 后果 + 严重级别。**写不出具体触发条件的不算发现**（checklist 文末「不算发现的」）。
+- 项目有历史 bug 经验文档时（工作区 `AGENTS.md` 引用；本机 creative-management-all 为 `docs/bug-lessons.md`），读索引，diff 命中的条目按其「排查同类」grep 一遍（尤其去重 / 唯一性、异步回包、出图相关改动）。
 
 严重级别定义：
 
@@ -77,15 +81,16 @@ git -C <repo> diff --staged   # 已暂存
 
 - Java：只跑受影响的测试类/包（L1）。整仓 `mvn test`（L3）只在用户要求或终验时跑。
 - 前端：`vue-tsc` / lint / 相关单测；注意前端测试文件通常**不提交**。
-- 有 pre-commit hook 的仓，确认 hook 已安装且能过。
+- 先确认本仓 hook 是否真的装了（`git config core.hooksPath` / `.git/hooks/`）：装了就要能过；没装（如 `creative-management`）按 `commit-conventions.md` §1 人工核对提交信息，不擅自安装。
 
 **不允许在未跑验证的情况下声称通过。** 贴出真实输出。
 
 ### Step 5 — 提交（只 commit，不 push、不建 PR）
 
 - `git add` 精确到文件，禁止裸 `git add -A`；对照 `.gitignore` 确认没带进构建产物、密钥、本地配置、IDE 文件、嵌套仓目录。
-- 提交信息格式见 `references/commit-conventions.md`（本工作区默认 `<type>:<JIRA票号> <中文描述>`，≤72 字符）。
+- 提交信息格式见 `references/commit-conventions.md`：后端 `<type>:<JIRA票号> <中文描述>`（冒号后无空格，type 只有 8 个）、前端 `<type>: <JIRA票号> <中文描述>`（冒号后**必须**空格，正文每行 ≤100），首行都 ≤72 字符；后端正文避开 `key` / `token` / `secret` / `password` 等词（hook 敏感词检查会交互卡死）。
 - 正文写「为什么这么改 + 影响面 + 已知风险」，不是复述 diff。
+- 拆分提交：全部 commit 完成后，逐个在独立 worktree 里编译（`commit-conventions.md` §5），任一失败不得报「已提交」。
 - commit 结束就停。**push 和 PR 需要用户另行明确要求。**
 
 ## 红灯清单

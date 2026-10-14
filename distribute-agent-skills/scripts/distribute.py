@@ -64,7 +64,7 @@ def md5(p: Path) -> str:
 
 
 STATE_FILE = Path(os.environ.get("DISTRIBUTE_STATE") or Path(__file__).resolve().parents[1] / ".last-distribute.json")
-LOCAL_ONLY = {".last-distribute.json", ".last-distribute.tmp"}  # 本机状态文件，不参与分发
+LOCAL_ONLY = {".last-distribute.json", ".last-distribute.tmp", ".commit-trailer"}  # 本机状态 / 本机配置，不参与分发
 MTIME_SLACK = 2.0  # 秒；文件系统时间精度与复制耗时的余量
 
 
@@ -137,7 +137,26 @@ def find_targets(home: Path, src: Path, skills, excludes: list[str], allow: list
     return out
 
 
-COMMIT_TRAILER = "Co-Authored-By: Claude Haiku 5.5 <noreply@anthropic.com>"
+TRAILER_FILE = Path(__file__).resolve().parents[1] / ".commit-trailer"
+
+
+def commit_trailer() -> str:
+    """提交消息末尾的署名行：环境变量 → 本 skill 目录的 `.commit-trailer`（本机私有、不分发）→ 空。
+
+    🔴 不写死模型名。写死的问题不是「措辞不好看」：模型名随版本变，改一次脚本就永久把
+    一个**跟当前会话不符**的名字写进公开仓库历史（本仓库历史里 6 次提交都是同一个旧名）。
+    要用署名就自己配一条（值就是整行，如 `Co-Authored-By: X <x@example.com>`）；
+    没配就不加这行 —— 宁可没有署名，也不要写一个假的名字。
+    """
+    t = (os.environ.get("SKILLS_COMMIT_TRAILER") or "").strip()
+    if not t:
+        try:
+            # utf-8-sig：PowerShell 5.1 的 `Set-Content -Encoding utf8` 会带 BOM，
+            # 不剥掉的话 BOM 会混进提交消息里。
+            t = TRAILER_FILE.read_text(encoding="utf-8-sig").strip()
+        except OSError:
+            t = ""
+    return t
 
 
 def commit_repo(repo: Path, skills) -> None:
@@ -149,11 +168,16 @@ def commit_repo(repo: Path, skills) -> None:
     if not status:
         print(f"\n{repo}：分发后无改动，不提交")
         return
-    msg = f"Distribute skills from ~/.claude/skills: {', '.join(paths)}\n\n{COMMIT_TRAILER}"
+    trailer = commit_trailer()
+    msg = f"Distribute skills from ~/.claude/skills: {', '.join(paths)}" + (f"\n\n{trailer}" if trailer else "")
     subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", msg, "--", *paths], check=True)
     head = subprocess.run(["git", "-C", str(repo), "log", "-1", "--oneline"],
                           check=True, capture_output=True, text=True).stdout.strip()
     print(f"\n{repo}：已本地提交（未 push）：{head}")
+    if trailer:
+        print(f"  署名行：{trailer}")
+    else:
+        print(f"  未加署名行（想加就设 SKILLS_COMMIT_TRAILER，或把整行写进 {TRAILER_FILE}）")
 
 
 def skill_files(skill_dir: Path):

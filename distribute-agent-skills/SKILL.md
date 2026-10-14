@@ -44,7 +44,23 @@ python scripts/distribute.py --skill pacvue-common-utils --skill creativehub-int
 | `--prune` | 复制全部成功（MD5 0 不一致）后删除残留文件与清空的目录。**先不带它跑一次看残留清单，确认后再加**（见下方「残留看过清单再清理」） |
 | `--include-repos` | 连 `IdeaProjects/` 下各仓库内的 skill 副本一起更新（见下方红线） |
 | `--include-skills-repo` / `--no-include-skills-repo` | **默认开**：同步 `IdeaProjects/skills` 本仓库；关掉用 `--no-include-skills-repo`（`skills - Copy` 等备份始终排除） |
-| `--commit-skills-repo` | 分发后在 `IdeaProjects/skills` 里**本地 commit** 本次分发的 skill 目录（只提交这些路径，不动仓库里其他改动；MD5 不一致则不提交）。**永不 push** |
+| `--commit-skills-repo` | 分发后在 `IdeaProjects/skills` 里**本地 commit** 本次分发的 skill 目录（只提交这些路径，不动仓库里其他改动；MD5 不一致则不提交）。**永不 push**；署名行见下 |
+
+### 提交消息的署名行（不写死）
+
+`--commit-skills-repo` 的提交消息 = `Distribute skills from ~/.claude/skills: <skills>` + 可选署名行。
+署名行按 **`SKILLS_COMMIT_TRAILER` 环境变量 → 本 skill 目录的 `.commit-trailer`（本机私有、不参与分发）→ 空** 取值：
+
+```powershell
+# 想带署名就配一条（值就是整行）
+"Co-Authored-By: 某某 <x@example.com>" | Set-Content ~/.claude/skills/distribute-agent-skills/.commit-trailer -Encoding utf8
+```
+
+🔴 **脚本不再写死模型名。** 写死的后果不是"措辞不好看"：模型名随版本变，会把一个**与当前会话不符**的名字
+永久写进公开仓库历史（本仓库曾连续 6 次提交都是同一个旧名）。**没配就不加这行 —— 宁可没有署名，也不写假名字。**
+
+> 提交消息正文的规范（type、署名从哪来）以 `commit-with-qa-review` skill 为准；那条规则明确要求
+> 「署名照抄当前会话给的那行，模型名会随版本变」—— 与这里不写死是同一个道理。
 
 ## 目标是怎么选出来的（别手工拷）
 
