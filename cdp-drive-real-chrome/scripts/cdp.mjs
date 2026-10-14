@@ -3,16 +3,21 @@
 //   node cdp.mjs <exprFile>               执行 JS，打印结果
 //   node cdp.mjs <exprFile> --shot        执行 JS 后截图（默认 cdp-shot.png，用 --out 改）
 //   node cdp.mjs <exprFile> --realclick   exprFile 返回 Element/selector 字符串，用真鼠标点击它
-//   node cdp.mjs <exprFile> --download    设下载目录后执行 JS（用于触发导出）
+//   node cdp.mjs <exprFile> --download    设下载目录后执行 JS（用于触发导出；完整导出验证用 export-target.mjs）
+//
+// 下载目录：--dl-dir <dir> > 环境变量 CDP_DL_DIR > <系统临时目录>/cdp-downloads（2026-10-13 起不再写死本机仓库路径）
 //
 // 并行/多账号（每个实例一个端口 + 一个独立 user-data-dir，登录态才隔离）:
 //   --port <n>        连哪个 Chrome 实例，默认 9222，也可用环境变量 CDP_PORT
-//   --match <substr>  选哪个 page target（按 URL 子串匹配），默认 localhost:3001
+//   --match <substr>  选哪个 page target（按 URL 子串匹配），默认 CDP_MATCH 或 localhost（与 conn.mjs 统一；匹配不到报错，不再退回第一个 page）
 //   --index <n>       匹配到多个时取第 n 个（从 0 起）。⚠️ /json/list 的顺序随标签激活而变，并行时别用它
 //   --target <id>     🔴 并行首选：按 targetId 精确锁定（也可用环境变量 CDP_TARGET）；给了就不看 --match/--index，找不到直接报错
 //   --list            只列出当前实例的所有 page target（含 targetId）后退出
 //   --out <path>      截图输出路径；并行时务必区分，否则互相覆盖
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { pickPage } from "./conn.mjs";
 
 function flag(name, dflt) {
   const i = process.argv.indexOf(name);
@@ -21,17 +26,17 @@ function flag(name, dflt) {
 const has = (name) => process.argv.includes(name);
 
 const PORT = Number(flag("--port", process.env.CDP_PORT || 9222));
-const MATCH = flag("--match", "localhost:3001");
+const MATCH = flag("--match", process.env.CDP_MATCH || "localhost");
 const INDEX = Number(flag("--index", 0));
 const TARGET = flag("--target", process.env.CDP_TARGET || "");
 const OUT = flag("--out", "cdp-shot.png");
-const DL_DIR = "C:\\Users\\HaijunLing\\IdeaProjects\\creative-management-all\\.workbuddy\\tmp\\downloads";
+const DL_DIR = path.resolve(flag("--dl-dir", process.env.CDP_DL_DIR || path.join(os.tmpdir(), "cdp-downloads")));
 
 const LIST_ONLY = has("--list");
 const exprFile = process.argv[2];
 const mode = process.argv[3] || "";
 if (!LIST_ONLY && (!exprFile || exprFile.startsWith("--"))) {
-  console.error("usage: node cdp.mjs <exprFile> [--shot|--realclick|--download] [--port N] [--match S] [--index N] [--out P]");
+  console.error("usage: node cdp.mjs <exprFile> [--shot|--realclick|--download] [--port N] [--target ID] [--match S] [--index N] [--out P] [--dl-dir D]");
   console.error("       node cdp.mjs --list [--port N]      # 只列出该实例的 page target");
   process.exit(2);
 }
@@ -47,20 +52,11 @@ if (LIST_ONLY) {
   process.exit(0);
 }
 
-// --target 优先：并行时每个分组只认自己登记的 targetId，找不到就报错，绝不退回去连别的标签
+// --target（或 CDP_TARGET）优先：并行时每个分组只认自己登记的 targetId，找不到就报错，绝不退回去连别的标签
+// 目标解析与 conn.mjs 共用 pickPage（唯一实现）
 let page;
-if (TARGET) {
-  page = pages.find((t) => t.id === TARGET);
-  if (!page) { console.error(`target ${TARGET} not found on port ${PORT}; 用 --list 看有哪些`); process.exit(3); }
-} else {
-  // 没给 --target：按 --match 过滤；匹配不到再退回全部 page（仅限单窗口场景）
-  const pool = pages.filter((t) => String(t.url).includes(MATCH));
-  page = (pool.length ? pool : pages)[INDEX];
-}
-if (!page) {
-  console.error(`no page target (port=${PORT} match=${MATCH} index=${INDEX}); 用 --list 看有哪些`);
-  process.exit(3);
-}
+try { page = pickPage(pages, { target: TARGET, match: MATCH, index: INDEX }); }
+catch (e) { console.error(`${e.message} (port=${PORT}); 用 --list 看有哪些`); process.exit(3); }
 console.error(`[cdp] port=${PORT} target[${INDEX}]: ${page.url}`);
 
 const ws = new WebSocket(page.webSocketDebuggerUrl);
@@ -81,7 +77,7 @@ function send(method, params = {}, timeout = 60000) {
   return new Promise((resolve, reject) => {
     pending.set(id, { resolve, reject });
     ws.send(JSON.stringify({ id, method, params }));
-    setTimeout(() => { if (pending.has(id)) { pending.delete(id); reject(new Error(`timeout: ${method}`)); } }, timeout);
+    setTimeout(() => { if (pending.has(id)) { pending.delete(id); reject(new Error(`timeout: ${method}`)); } }, timeout).unref();
   });
 }
 
@@ -125,6 +121,7 @@ if (mode === "--realclick") {
   if (mode === "--download") {
     fs.mkdirSync(DL_DIR, { recursive: true });
     await send("Page.setDownloadBehavior", { behavior: "allow", downloadPath: DL_DIR });
+    console.error(`[cdp] download dir -> ${DL_DIR}`);
   }
   const result = await send("Runtime.evaluate", {
     expression, returnByValue: true, awaitPromise: true, userGesture: true,

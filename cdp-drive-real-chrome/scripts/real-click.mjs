@@ -1,16 +1,19 @@
 // 真鼠标点击：按「选择器 + 可见文本」定位元素中心，派发 CDP 真实鼠标事件。
-// 与 cdp.mjs --realclick 的区别：那个要你先写一个 expr 文件返回元素，本脚本直接给选择器。
-//   —— 页签/下拉项这类「有稳定 class + 短文本」的元素，用本脚本最省事。
+// 三种真点击实现怎么选（权威说明见 references/SCRIPTS.md「三种点击」）：
+//   - 本脚本：给「选择器 + 可见文本」，页签/下拉项这类「有稳定 class + 短文本」的元素最省事；--list 可先列候选
+//   - cdp.mjs <expr.js> --realclick：expr 返回 Element，适合一次性的复杂定位
+//   - L1 click-js.mjs <page.js>：page.js 返回 {x,y}，适合页面级脚本已算好坐标（如 full-number-toggle.js）
 //
 // 用法:
+//   CDP_TARGET=<id> node real-click.mjs --sel ".platform-tab__btn" --text "Walmart"
 //   node real-click.mjs --sel ".platform-tab__btn" --text "Walmart" [--target <id>]
 //   node real-click.mjs --sel "button" --text "Search" --nth 1 --after 30000
 //   node real-click.mjs --sel ".x" --text "Y" --list      # 只列出候选，不点（排查选择器）
 //
 // 参数:
-//   --port <n>     CDP 端口，默认 9222
-//   --target <id>  页面 target id；不给则用 --match 匹配
-//   --match <sub>  按 URL 子串选 target，默认取第一个 page
+//   --port <n>     CDP 端口，默认 CDP_PORT 或 9222
+//   --target <id>  页面 target id；不给则读 CDP_TARGET（🔴 并行时必须二选一给）
+//   --match <sub>  无 target 时按 URL 子串选 page，默认 CDP_MATCH 或 localhost；匹配不到报错
 //   --sel <css>    必填，CSS 选择器
 //   --text <str>   必填，元素可见文本（trim + 折叠空白后**全等**匹配）
 //   --nth <n>      多个同名匹配时取第 n 个（从 0 起），默认 0
@@ -22,6 +25,7 @@
 // 为什么必须真鼠标事件：`el.click()` 只派发 JS 事件，很多组件（Popper/ElTooltip/拖拽）
 // 监听的是 pointerdown/mousedown 或依赖坐标，JS click 静默无效 —— 表现为「点了没反应」。
 import fs from "node:fs";
+import { connect, cliTargetOpts } from "./conn.mjs";
 
 function flag(name, dflt) {
   const i = process.argv.indexOf(name);
@@ -29,7 +33,6 @@ function flag(name, dflt) {
 }
 const has = (n) => process.argv.includes(n);
 
-const PORT = Number(flag("--port", 9222));
 const SEL = flag("--sel", "");
 const TEXT = flag("--text", "");
 const NTH = Number(flag("--nth", 0));
@@ -45,58 +48,11 @@ if (!SEL) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const targets = await (await fetch(`http://127.0.0.1:${PORT}/json/list`)).json();
-let page;
-const TARGET = flag("--target", "");
-if (TARGET) {
-  page = targets.find((t) => t.id === TARGET);
-  if (!page) {
-    console.error("TARGET_NOT_FOUND", TARGET);
-    process.exit(2);
-  }
-} else {
-  const MATCH = flag("--match", "");
-  const pages = targets.filter((t) => t.type === "page");
-  page = (MATCH ? pages.find((t) => String(t.url).includes(MATCH)) : null) || pages[0];
-  if (!page) {
-    console.error("NO_PAGE_TARGET");
-    process.exit(3);
-  }
-}
-
-const ws = new WebSocket(page.webSocketDebuggerUrl);
-let id = 1;
-const pend = new Map();
-ws.addEventListener("message", (ev) => {
-  const m = JSON.parse(ev.data);
-  if (m.id && pend.has(m.id)) {
-    const p = pend.get(m.id);
-    pend.delete(m.id);
-    m.error ? p.reject(new Error(JSON.stringify(m.error))) : p.resolve(m.result);
-  }
-});
-const send = (method, params = {}, timeout = 60000) =>
-  new Promise((resolve, reject) => {
-    const i = id++;
-    pend.set(i, { resolve, reject });
-    ws.send(JSON.stringify({ id: i, method, params }));
-    setTimeout(() => {
-      if (pend.has(i)) {
-        pend.delete(i);
-        reject(new Error("timeout " + method));
-      }
-    }, timeout);
-  });
-
-await new Promise((r, j) => {
-  ws.addEventListener("open", r, { once: true });
-  ws.addEventListener("error", j, { once: true });
-});
-
-// 后台标签节流：页面不可见时定时器被压到 1/min，await sleep 会像卡死。必须在同一连接上开。
-try {
-  await send("Emulation.setFocusEmulationEnabled", { enabled: true });
-} catch {}
+// 连接与目标解析统一走 conn.mjs：--target > CDP_TARGET > --match / CDP_MATCH（默认 localhost）；找不到直接报错，不再退回第一个 page
+let c;
+try { c = await connect(cliTargetOpts()); } catch (e) { console.error("NO_PAGE_TARGET " + e.message); process.exit(3); }
+const send = c.send;
+// 后台标签节流：conn.mjs 已在同一连接上开 setFocusEmulationEnabled
 
 const ev = async (expr) => {
   const r = await send("Runtime.evaluate", {
@@ -159,8 +115,7 @@ if (DBL) {
 }
 
 if (OUT) {
-  const r = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
-  fs.writeFileSync(OUT, Buffer.from(r.data, "base64"));
+  await c.shot(OUT, { captureBeyondViewport: false });
 }
 
 console.log(
@@ -174,7 +129,5 @@ console.log(
   })
 );
 await sleep(AFTER);
-try {
-  ws.close();
-} catch {}
+c.close();
 process.exit(0);

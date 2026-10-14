@@ -1,5 +1,8 @@
 #!/usr/bin/env python
-"""把两个 workflow skill 从源目录分发到本机所有 agent 的 skills 目录。
+"""【DEPRECATED】请改用独立 skill `distribute-agent-skills`（~/.claude/skills/distribute-agent-skills/scripts/distribute.py）。
+本文件仅为历史兼容保留、不再维护，两份可能已不一致；文档一律指向独立 skill。
+
+把两个 workflow skill 从源目录分发到本机所有 agent 的 skills 目录。
 
 用法：
     python scripts/distribute.py              # 分发并逐文件 MD5 校验

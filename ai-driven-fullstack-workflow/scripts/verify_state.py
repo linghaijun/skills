@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """浏览器实机验证步骤（fullstack Step 11.4 / backend Step 10.4）的**用例状态登记**：多会话 / 多浏览器并行时用。只用标准库。
 
@@ -19,6 +19,8 @@
     证据终验（不重跑浏览器，只核对证据内容是否支撑结论）:
         未终验 | 终验中 | 终验通过 | 终验不通过 | 豁免（证据不足、用户明确放行；必须 --note 写放行范围与用户原话）
     生命周期：待验证 -> 验证中 ->（发现问题）修复中 -> 验证中（复验）-> 通过/失败/...
+    改代码后：invalidate 把受影响 AC 打回「待验证」（终验同时作废，记作废时间与原因），
+              重新 claim 时无需 --force；finish 时若证据目录没有晚于作废时间的文件会告警。
 
 窗口标识规范（**每个会话必须登记自己打开的那个窗口**）:
     内置浏览器        tab:<tabId>
@@ -36,6 +38,8 @@
     python verify_state.py reclaim --dir docs/develop/xxx --ac AC-01 --session s2 --window tab:9999
     python verify_state.py final   --dir docs/develop/xxx --ac ALL  --session s1 --status 终验中
     python verify_state.py final   --dir docs/develop/xxx --ac AC-01 --session s1 --status 终验通过 --note "证据支撑结论"
+    python verify_state.py invalidate --dir docs/develop/xxx --acs AC-03,AC-07 --reason "16:20 改 AiProgressBar 过渡时长" [--session s1]
+    python verify_state.py backfill-duration --dir docs/develop/xxx [--acs AC-01,AC-02] [--dry-run] [--force]
 
 退出码:
     0 = 正常
@@ -51,6 +55,7 @@ import json
 import os
 import re
 import sys
+import subprocess
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -181,25 +186,34 @@ def classify_verdict(cell: str):
 
 
 def _verdict_text(text: str):
-    """从 RESULT.md 提取「结论」文本。实测存在 3 种格式，按可靠度依次尝试：
+    """从 RESULT.md 提取「结论」文本。按可靠度依次尝试：
 
     1. 表格行：`| 结论 | ✅ **PASS** |`（Chewy / 新增Video）
-    2. 独立标记行：标题下裸写 `✅ **通过**`（Walmart 风格）
-    3. 项目符号行：`- 结论：**通过**`（Amazon 风格，取**最后一条** —— 后面的才是最终结论）
+    2. 顶层项目符号行：`- 结论：**通过**`，取**第一条**（顶格的 `- 结论：` 才是当前结论）
+    3. 独立标记行：标题下裸写 `✅ **通过**`（Walmart 风格）
+    4. 兜底：其余含「结论：」的行取**最后一条**
     都找不到返回 None（→ 保持待验证，不乱猜）。
+
+    🔴 `>` 引用块里的一律忽略：重验后旧结论按惯例挪进「## 历史结论」并用 `>` 引用保留，
+    它们可能写着「首测阻塞」「原结论：部分」。曾经取「最后一条结论行」，
+    正好取到引用块里的历史结论，把已通过的 AC 误判成阻塞（CP-58118 AC-89）。
     """
-    lines = text.splitlines()
+    lines = [l for l in text.splitlines() if not l.lstrip().startswith(">")]
     for line in lines:                                    # 1)
         if re.match(r"^\s*\|\s*结论\s*\|", line):
             cells = [c.strip() for c in line.strip().strip("|").split("|")]
             return cells[-1] if cells else ""
-    for line in lines[:15]:                               # 2)
+    for line in lines:                                    # 2)
+        m = re.match(r"^[-*•]\s*\**结论\**\s*[:：]\s*(.*)$", line)
+        if m:
+            return m.group(1).strip()
+    for line in lines[:15]:                               # 3)
         s = line.strip()
-        if re.match(r"^[*`_>\s]*(✅|⬜|❌|🟡|🚫)", s):
+        if re.match(r"^[*`_\s]*(✅|⬜|❌|🟡|🚫)", s):
             return s
-    hits = [l for l in lines if re.search(r"结论\s*[:：]", l)]   # 3)
+    hits = [l for l in lines if re.search(r"结论\s*[:：]", l)]   # 4)
     if hits:
-        return re.sub(r"^[\s>*\-•]*\**结论\**\s*[:：]\s*", "", hits[-1]).strip()
+        return re.sub(r"^[\s*\-•]*\**结论\**\s*[:：]\s*", "", hits[-1]).strip()
     return None
 
 
@@ -428,6 +442,7 @@ def cmd_finish(args) -> int:
         if old_final in FC_FINAL:
             c.update(final_status="未终验", final_by=None, final_at=None,
                      final_note="重新验证后作废（原为「" + old_final + "」），需重新终验")
+        stale_warn = _stale_evidence_warning(d, args.ac, c)
         s0 = c.get("started_at")
         if s0:
             try:
@@ -440,7 +455,34 @@ def cmd_finish(args) -> int:
     checklist = {"通过": "[done]", "阻塞": "[blocked]"}.get(args.status, "[open]")
     print(args.ac + " 收尾：status=" + args.status + "（Checklist 应回写 " + checklist
           + "）  session=" + str(c.get("session")) + " window=" + str(c.get("window")))
+    if stale_warn:
+        print(stale_warn)
     return 0
+
+
+def _evidence_files(d: Path, ac: str):
+    """tests/AC-NN/evidence/** 下的全部文件（不含 script/、RESULT.md 等）。"""
+    ac_dir = _ac_dir(d / "tests", ac)
+    ev = ac_dir / "evidence" if ac_dir is not None else None
+    if ev is None or not ev.is_dir():
+        return []
+    return [p for p in ev.rglob("*") if p.is_file()]
+
+
+def _stale_evidence_warning(d: Path, ac: str, c: dict):
+    """作废过的 AC 收尾时：证据目录里一个晚于作废时间的文件都没有 → 多半是拿旧证据交差。"""
+    inv = c.get("invalidated_at")
+    if not inv:
+        return None
+    try:
+        t_inv = datetime.datetime.fromisoformat(inv).timestamp()
+    except ValueError:
+        return None
+    files = _evidence_files(d, ac)
+    if any(p.stat().st_mtime > t_inv for p in files):
+        return None
+    return ("[!] " + ac + " 曾于 " + inv + " 因改动作废（" + str(c.get("invalidated_reason") or "")
+            + "），但 evidence/ 下没有晚于该时间的文件 —— 旧证据不能支撑新结论，请重拍后再收尾。")
 
 
 def cmd_final(args) -> int:
@@ -505,6 +547,168 @@ def cmd_final(args) -> int:
         print("说明：终验通过只代表「证据支撑结论」，验证状态本身没有变（Checklist 仍需按 status 回写）。")
     if failed:
         print("[!] 终验不通过：按「发现问题」处理 —— 先看证据缺什么，必要时才重新 claim 做实机复验。")
+    return 0
+
+
+def cmd_invalidate(args) -> int:
+    """改代码后作废受影响 AC 的验证结论与终验（playbook §4.0 #7 的机制化，CP-58118）。
+
+    时效类退回占验收不通过的一半：改完代码只在时间线记一行，受影响 AC 仍挂着「通过 / 终验通过」，
+    验证组不会回头看时间线。所以改动登记与作废必须一步完成，看板立刻变色。
+
+    - 已完结（通过 / 失败 / 部分 …）→ 打回「待验证」，原状态与起止时间挪进 history
+    - 验证中 / 修复中 → 状态不动（正在验），只记作废时间：finish 前必须有晚于作废时间的证据
+    - 待验证 → 只记作废时间
+    - 终验（终验中 / 终验通过 / 终验不通过 / 豁免）一律回到「未终验」，与 finish 里的作废同口径
+    """
+    d = resolve_dir(args.dir)
+    acs = [a.strip() for a in args.acs.split(",") if a.strip()]
+    bad = [a for a in acs if not AC_RE.match(a)]
+    if bad or not acs:
+        return die("--acs 写法非法: " + str(bad or args.acs) + "（应为 AC-01,AC-02）")
+    if not args.reason.strip():
+        return die("--reason 必填：写清改了什么（时间 / 文件 / 改动），验收要拿它对照证据时间")
+    ts = now()
+    reopened, marked, missing = [], [], []
+    with file_lock(d / LOCK_REL):
+        st = load(d)
+        for raw in acs:
+            ac = resolve_ac(st, raw)
+            c = st["cases"].get(ac)
+            if c is None:
+                missing.append(raw)
+                continue
+            old, old_final = c["status"], c.get("final_status") or "未终验"
+            c.setdefault("history", []).append({
+                "status": old, "final_status": old_final,
+                "started_at": c.get("started_at"), "finished_at": c.get("finished_at"),
+                "duration_seconds": c.get("duration_seconds"),
+                "invalidated_at": ts, "reason": args.reason})
+            c.update(invalidated_at=ts, invalidated_reason=args.reason,
+                     invalidated_by=args.session, updated_at=ts)
+            if old in FINAL_STATUSES:
+                c.update(status="待验证", session=None, window=None, engine=None,
+                         started_at=None, finished_at=None, duration_seconds=None,
+                         note="改动作废（原为「" + old + "」）：" + args.reason)
+                reopened.append(ac + "(" + old + ")")
+            else:
+                c["note"] = ((c.get("note") or "") + "；改动作废：" + args.reason).lstrip("；")
+                marked.append(ac + "(" + old + ")")
+            if old_final != "未终验":
+                c.update(final_status="未终验", final_by=None, final_at=None,
+                         final_note="改动后作废（原为「" + old_final + "」）：" + args.reason)
+        save(d, st)
+    print("作废登记 @ " + ts + "，原因：" + args.reason)
+    if reopened:
+        print("  打回「待验证」 " + str(len(reopened)) + " 条：" + ", ".join(reopened))
+    if marked:
+        print("  进行中 / 未验，仅记作废时间 " + str(len(marked)) + " 条：" + ", ".join(marked)
+              + "（收尾前须有晚于作废时间的证据）")
+    if missing:
+        print("[!] 未登记，已跳过：" + ", ".join(missing))
+    return 0 if (reopened or marked) else 2
+
+
+_NOTES_MIN_RE = re.compile(r"用时[^0-9\n]{0,6}?(\d+(?:\.\d+)?)\s*分钟")
+
+
+def _duration_from_notes(d: Path, ac: str):
+    """NOTES.md 里手写的「用时约 N 分钟」逐处相加。返回 (秒, 处数) 或 None。"""
+    ac_dir = _ac_dir(d / "tests", ac)
+    if ac_dir is None:
+        return None
+    mins = []
+    for p in sorted(ac_dir.rglob("NOTES.md")):
+        mins += [float(x) for x in _NOTES_MIN_RE.findall(p.read_text(encoding="utf-8", errors="replace"))]
+    if not mins:
+        return None
+    return round(sum(mins) * 60), len(mins)
+
+
+def _duration_from_mtimes(d: Path, ac: str, gap_min: float):
+    """证据文件 mtime 排序后分段：相邻间隔 > gap_min 分钟切段，每段至少 1 分钟。
+
+    返回 (秒, 段数, 最后一个文件的时间戳) 或 None。
+    """
+    ts = sorted(p.stat().st_mtime for p in _evidence_files(d, ac))
+    if not ts:
+        return None
+    segs, a, b = [], ts[0], ts[0]
+    for t in ts[1:]:
+        if t - b > gap_min * 60:
+            segs.append((a, b))
+            a = t
+        b = t
+    segs.append((a, b))
+    total = sum(max(60.0, y - x) for x, y in segs)
+    return round(total), len(segs), ts[-1]
+
+
+def cmd_backfill_duration(args) -> int:
+    """历史 / 漏计时的 AC 回填耗时（看板「累计验证工时」靠它；CP-58118 看板耗时全是 0~1 秒）。
+
+    来源优先级：NOTES.md 手写「用时 N 分钟」（逐处相加）> 证据文件 mtime 分段累加。
+    写回：duration_seconds = 合计；以 finished_at（无则取最后一个证据文件时间）为终点，
+    started_at = 终点 - 合计（看板按 started_at / finished_at 算耗时）；note 追加「耗时回填：来源」。
+    默认只处理「已完结且现耗时 < 60 秒或缺失」的条目，--force 全部重算；--dry-run 只打印。
+    """
+    d = resolve_dir(args.dir)
+    with file_lock(d / LOCK_REL):
+        st = load(d)
+        targets = ([resolve_ac(st, a.strip()) for a in args.acs.split(",") if a.strip()]
+                   if args.acs else sorted(st["cases"], key=ac_key))
+        rows, changed = [], 0
+        for ac in targets:
+            c = st["cases"].get(ac)
+            if c is None or c["status"] not in FC_DONE:
+                continue
+            cur = c.get("duration_seconds")
+            try:
+                s0 = datetime.datetime.fromisoformat(c["started_at"]) if c.get("started_at") else None
+                f0 = datetime.datetime.fromisoformat(c["finished_at"]) if c.get("finished_at") else None
+                if s0 and f0:
+                    cur = (f0 - s0).total_seconds()
+            except (TypeError, ValueError):
+                pass
+            if cur is not None and cur >= 60 and not args.force:
+                continue
+            src, sec, end = None, None, c.get("finished_at")
+            got = _duration_from_notes(d, ac)
+            if got:
+                sec, n = got
+                src = "NOTES 用时合计 " + str(round(sec / 60)) + " 分钟（" + str(n) + " 处）"
+            mt = _duration_from_mtimes(d, ac, args.gap)
+            if sec is None and mt:
+                sec, n, _last = mt
+                src = ("证据文件时间分段累加（" + str(n) + " 段，间隔>" + str(int(args.gap))
+                       + " 分钟切段，每段至少 1 分钟）")
+            if sec is None:
+                rows.append((ac, cur, None, "跳过：无 NOTES 用时、无证据文件"))
+                continue
+            if not end and mt:
+                end = datetime.datetime.fromtimestamp(mt[2]).astimezone().isoformat(timespec="seconds")
+            if not end:
+                rows.append((ac, cur, None, "跳过：无 finished_at 也无证据时间"))
+                continue
+            rows.append((ac, cur, sec, src))
+            if args.dry_run:
+                continue
+            e = datetime.datetime.fromisoformat(end)
+            note = re.sub(r"；?耗时回填：[^；]*", "", c.get("note") or "")
+            c.update(duration_seconds=sec, finished_at=end,
+                     started_at=(e - datetime.timedelta(seconds=sec)).isoformat(timespec="seconds"),
+                     note=(note + "；耗时回填：" + src).lstrip("；"))
+            changed += 1
+        if not args.dry_run and changed:
+            save(d, st)
+    print("| AC | 现耗时(秒) | 回填(秒) | 来源 |")
+    print("|---|---|---|---|")
+    for ac, cur, sec, src in rows:
+        print("| " + ac + " | " + ("-" if cur is None else str(round(cur))) + " | "
+              + ("-" if sec is None else str(sec)) + " | " + src + " |")
+    n_ok = sum(1 for r in rows if r[2] is not None)
+    print(("[dry-run] 将回填 " + str(n_ok) + " 条，未写登记") if args.dry_run
+          else ("已回填 " + str(changed) + " 条"))
     return 0
 
 
@@ -596,6 +800,21 @@ def main() -> int:
     p.add_argument("--force", action="store_true")
     p.set_defaults(func=cmd_finish)
 
+    p = sub.add_parser("invalidate", help="改代码后作废受影响 AC：打回待验证 + 终验作废 + 记时间与原因")
+    add_dir(p)
+    p.add_argument("--acs", required=True, help="逗号分隔，如 AC-03,AC-07")
+    p.add_argument("--reason", required=True, help="改了什么：时间 / 文件 / 改动摘要")
+    p.add_argument("--session", default=None, help="登记作废的会话（可选）")
+    p.set_defaults(func=cmd_invalidate)
+
+    p = sub.add_parser("backfill-duration", help="按 NOTES 用时 / 证据 mtime 分段回填耗时")
+    add_dir(p)
+    p.add_argument("--acs", help="逗号分隔；不给则处理全部已完结 AC")
+    p.add_argument("--gap", type=float, default=15.0, help="证据时间切段间隔（分钟，默认 15）")
+    p.add_argument("--dry-run", action="store_true", help="只打印将回填的结果，不写登记")
+    p.add_argument("--force", action="store_true", help="已有 >=60 秒耗时的也重算")
+    p.set_defaults(func=cmd_backfill_duration)
+
     p = sub.add_parser("reclaim", help="回收超时的「验证中」")
     add_dir(p)
     p.add_argument("--ac", required=True)
@@ -604,12 +823,43 @@ def main() -> int:
     p.add_argument("--engine", default="内置浏览器")
     p.set_defaults(func=cmd_reclaim)
 
+    for sp in sub.choices.values():
+        sp.add_argument("--no-dashboard", action="store_true",
+                        help="不自动刷新验证进度看板（默认每次登记成功后刷新）")
     args = ap.parse_args()
     try:
-        return args.func(args)
+        rc = args.func(args)
     except TimeoutError as e:
         return die(str(e))
+    if rc == 0 and args.cmd in REFRESH_CMDS and not args.no_dashboard:
+        refresh_dashboard(args.dir)
+    return rc
+
+
+# 每验完 / 改动一条 AC 就刷新看板：用户靠看板看进度，不刷新就等于不知道进度（用户 2026-10-13 要求）。
+# 状态本身看板会轮询实时读；证据清单、RESULT 摘要等快照只有重跑 verify_dashboard.py 才更新。
+REFRESH_CMDS = {"init", "claim", "fix", "finish", "final", "reclaim", "invalidate", "backfill-duration"}
+
+
+def refresh_dashboard(req_dir) -> None:
+    script = Path(__file__).with_name("verify_dashboard.py")
+    if not script.exists():
+        return
+    try:
+        r = subprocess.run([sys.executable, str(script), "--dir", str(resolve_dir(req_dir))],
+                           capture_output=True, text=True, encoding="utf-8", errors="replace",
+                           timeout=180, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+        tail = (r.stdout or r.stderr or "").strip().splitlines()[-1:]
+        print("看板已刷新" + ("：" + tail[0] if tail else "") if r.returncode == 0
+              else "⚠️ 看板刷新失败（登记已成功）：" + " ".join(tail))
+    except Exception as e:  # 刷新失败不影响登记结果
+        print("⚠️ 看板刷新失败（登记已成功）：" + str(e))
 
 
 if __name__ == "__main__":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
     sys.exit(main())

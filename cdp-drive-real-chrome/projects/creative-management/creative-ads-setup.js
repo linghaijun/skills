@@ -7,9 +7,9 @@
 //   2. **切素材类型页签后平台页签会短暂只剩 All**（组件重建）→ 必须轮询等它出现，不能 sleep 死等。
 //   3. **改页签后必须再点 Search**，否则列表数据仍是上一次的 —— 高亮变了、数据没变，最容易误判。
 //
-// 用法（经 skill 的 cdp.mjs 执行，见本目录 README）:
-//   node cdp.mjs creative-ads-setup.js --port 9222 --match localhost:3001
-//   → 先跑一次拿 token 提示，或直接用 README 里的 ps1 包装器
+// 用法（经同目录 run-page.mjs 执行 —— 它负责把 __X__ 占位符换成实参；直接用 cdp.mjs 跑会因裸占位符报语法错，见本目录 README）:
+//   CDP_TARGET=<id> node run-page.mjs creative-ads-setup.js --param FILE_TYPE=Video --param PLATFORM=Walmart --param DO_RELOAD=false --wait 20000 --out state.json
+//   node run-page.mjs creative-ads-setup.js --list      # 看需要哪些参数
 //
 // 参数（由 run-page.mjs 注入；占位符**不要自己加引号**，它会按类型自动加）:
 //   FILE_TYPE   素材类型页签文本 Image|Video|Logo，空字符串 = 不动（不要自己加引号）

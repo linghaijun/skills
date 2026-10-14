@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>__TITLE__</title>
+<script>/* 主题尽早生效，避免先白后黑闪一下 */try{var t=localStorage.getItem('vd_theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
+<!--__CSS__-->
+</head>
+<body>
+<header class="top" id="top">
+  <h1 id="title">验证进度看板</h1>
+  <span id="switcher"></span>
+  <span class="sp"></span>
+  <span class="conn" id="conn"><span class="dot idle" id="dot"></span><span id="connTxt">初始化…</span></span>
+  <span class="dataTime" id="dataTime" title=""></span>
+  <button type="button" id="refresh" title="立即刷新（R）">刷新</button>
+  <button type="button" id="theme" title="切换主题：跟随系统 / 浅色 / 深色">主题</button>
+  <button type="button" id="keys" title="快捷键（?）">?</button>
+</header>
+<main id="app"></main>
+<div id="modal" class="modal" role="dialog" aria-modal="true">
+  <div class="modal-box">
+    <div class="modal-head">
+      <span class="ttl" id="modal-title"></span>
+      <span class="sp"></span>
+      <span class="zoom" id="modal-zoom"></span>
+      <span class="view-toggle" id="modal-view-toggle">
+        <button type="button" id="btn-md-preview" class="on" data-act="md-preview">预览</button>
+        <button type="button" id="btn-md-source" data-act="md-source">原文</button>
+      </span>
+      <a id="modal-raw" href="#" target="_blank" rel="noopener">新标签打开 ↗</a>
+      <button type="button" data-act="modal-close">关闭 ✕</button>
+    </div>
+    <div class="modal-body" id="modal-body"></div>
+    <div class="ev-foot" id="modal-nav">
+      <button type="button" id="nav-prev" data-act="nav-prev" title="上一个（←；到头自动跨到上一条 AC）">‹</button>
+      <span class="ev-pos" id="modal-pos"></span>
+      <button type="button" id="nav-next" data-act="nav-next" title="下一个（→；到尾自动跨到下一条 AC）">›</button>
+    </div>
+  </div>
+</div>
+<script type="application/json" id="payload">__DATA__</script>
+<!--__JS__-->
+</body></html>

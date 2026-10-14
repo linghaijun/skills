@@ -54,7 +54,7 @@
 
 | 经验的性质 | 落点 |
 |---|---|
-| **浏览器 / 实机验证**的手法与坑（取证、异常态构造、并行、登录态、工具失效时的替代路径） | `references/browser-verification-playbook.md` |
+| **浏览器 / 实机验证**的手法与坑（取证、异常态构造、并行、登录态、工具失效时的替代路径） | 按主题进 `references/browser-playbook-core.md` / `-tools-cdp.md` / `-evidence.md` / `-parallel.md`（索引 `browser-verification-playbook.md` 只放红线清单，不放细则） |
 | **缺陷检查项**（又一类"代码会在什么情况下错"） | `references/bug-hunting-checklist.md` 对应检查域 |
 | **证据怎样才算数**（验收判据、盲审规则） | `references/evidence-acceptance.md` |
 | **某一步的具体做法 / 约束 / 门控** | 该步的 `references/step-NN-*.md` |
@@ -118,7 +118,7 @@
 | # | 候选经验（一句话） | 代价（实际发生了什么） | 抹名后 | 建议落点（到文件） | 查重结果 | 动作化后的规则 |
 |---|---|---|---|---|---|---|
 | 1 | …… | 某条 AC 返工两轮 | 规则仍成立 | step-NN-*.md（该步约束） | 与既有条目不同主题 | 写 XML 前先 grep 实际表名 |
-| 2 | …… | 取证白做 40min | 规则仍成立 | browser-verification-playbook.md | 该文件已有相近段落 → 并入 | 截图前先裁剪放大到判定点 |
+| 2 | …… | 取证白做 40min | 规则仍成立 | browser-playbook-evidence.md | 该文件已有相近段落 → 并入 | 截图前先裁剪放大到判定点 |
 | 3 | …… | 查日志白查 40min | 什么都不剩 | AGENTS.md / Workspace Facts | 无 | 查缓存前先确认 db 号 |
 ```
 

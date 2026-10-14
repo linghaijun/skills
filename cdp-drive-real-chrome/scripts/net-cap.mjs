@@ -3,14 +3,15 @@
 //   内置浏览器的面板又太窄无法做交互型验证 → 「点完操作后接口返回了什么」只能靠 CDP 自己收。
 //
 // 用法:
+//   CDP_TARGET=<id> node net-cap.mjs --out cap.json          # 并行：锁本组窗口
 //   node net-cap.mjs --url http://localhost:3001/xxx --wait 40000 --out cap.json
 //   node net-cap.mjs --out cap.json --match "/api/creative" --body-max 12000
 //   node net-cap.mjs --out cap.json --no-bodies            # 只要 URL+状态码，不要响应体
 //
 // 参数:
-//   --port <n>       CDP 端口，默认 9222
-//   --target <id>    指定页面；不给则用 --match
-//   --match <sub>    按 URL 子串选 target，默认取第一个 page
+//   --port <n>       CDP 端口，默认 CDP_PORT 或 9222
+//   --target <id>    指定页面；不给则读 CDP_TARGET（🔴 并行时必须给其一）
+//   --match <sub>    无 target 时按 URL 子串选 page，默认 CDP_MATCH 或 localhost；匹配不到报错（不再退回第一个 page）
 //   --url <url>      先导航到该 URL；不给则就地采集（点完操作再跑这个模式）
 //   --wait <ms>      采集时长，默认 40000（🔴 后端列表接口常需 20~42s，别设短）
 //   --out <path>     落盘 JSON（必填）
@@ -29,6 +30,7 @@
 //  2. responseReceived 早于 loadingFinished，此时 getResponseBody 会失败 —— 所以在等待窗口结束后再取。
 //  3. URL 去掉 origin 只留 path+query 前缀，便于跨环境对比；但要保留 status，否则「404 当成功读」很常见。
 import fs from "node:fs";
+import { connect, cliTargetOpts } from "./conn.mjs";
 
 function flag(name, dflt) {
   const i = process.argv.indexOf(name);
@@ -36,8 +38,6 @@ function flag(name, dflt) {
 }
 const has = (n) => process.argv.includes(n);
 
-const PORT = Number(flag("--port", 9222));
-const MATCH = flag("--match", "");
 const URL_ = flag("--url", "");
 const WAIT = Number(flag("--wait", 40000));
 const OUT = flag("--out", "");
@@ -56,55 +56,11 @@ const strip = (u) => String(u).replace(/^https?:\/\/[^/]+/, "");
 const uniq = (a) => [...new Set(a)];
 const bodyRe = MATCH_BODY ? new RegExp(MATCH_BODY) : /json|text|javascript/;
 
-const targets = await (await fetch(`http://127.0.0.1:${PORT}/json/list`)).json();
-const pages = targets.filter((t) => t.type === "page");
-let page;
-const TARGET = flag("--target", "");
-if (TARGET) {
-  page = pages.find((t) => t.id === TARGET);
-  if (!page) {
-    console.error("TARGET_NOT_FOUND", TARGET);
-    process.exit(2);
-  }
-} else {
-  page = (MATCH ? pages.find((t) => String(t.url).includes(MATCH)) : null) || pages[0];
-}
-if (!page) {
-  console.error("NO_PAGE_TARGET");
-  process.exit(3);
-}
-
-const ws = new WebSocket(page.webSocketDebuggerUrl);
-let id = 1;
-const pending = new Map();
-ws.addEventListener("message", (ev) => {
-  const m = JSON.parse(ev.data);
-  if (m.id && pending.has(m.id)) {
-    const { resolve, reject } = pending.get(m.id);
-    pending.delete(m.id);
-    m.error ? reject(new Error(JSON.stringify(m.error))) : resolve(m.result);
-  }
-});
-const send = (method, params = {}, timeout = 60000) =>
-  new Promise((resolve, reject) => {
-    const i = id++;
-    pending.set(i, { resolve, reject });
-    ws.send(JSON.stringify({ id: i, method, params }));
-    setTimeout(() => {
-      if (pending.has(i)) {
-        pending.delete(i);
-        reject(new Error("timeout " + method));
-      }
-    }, timeout);
-  });
-
-await new Promise((r, j) => {
-  ws.addEventListener("open", r, { once: true });
-  ws.addEventListener("error", j, { once: true });
-});
-try {
-  await send("Emulation.setFocusEmulationEnabled", { enabled: true });
-} catch {}
+// 连接与目标解析统一走 conn.mjs：--target > CDP_TARGET > --match / CDP_MATCH（默认 localhost）；找不到直接报错
+let c;
+try { c = await connect(cliTargetOpts()); } catch (e) { console.error("NO_PAGE_TARGET " + e.message); process.exit(3); }
+const page = c.page;
+const send = c.send;
 
 await send("Network.enable", {});
 await send("Page.enable");
@@ -124,9 +80,7 @@ const out = {
 };
 const byId = new Map();
 
-ws.addEventListener("message", async (ev) => {
-  const m = JSON.parse(ev.data);
-  if (!m.method) return;
+c.on((m) => {
   if (m.method === "Network.requestWillBeSent") {
     const r = m.params.request;
     byId.set(m.params.requestId, {
@@ -228,7 +182,5 @@ console.log(
     1
   )
 );
-try {
-  ws.close();
-} catch {}
+c.close();
 process.exit(0);

@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import difflib
 import json
 import re
 import sys
@@ -62,7 +63,9 @@ def _is_waived(text: str, n: int) -> bool:
     该修的是规则，不是文档。
     """
     for line in text.splitlines():
-        m = re.search(rf"R-0*{n}\b", line)
+        # 只认以 R-n 开头的条目行（表格行 / 列表项）：汇总段「3 项 WAIVED（R-10、R-29…）」
+        # 也含 R-n 与 WAIVED，整行搜索会把汇总里列过的项都算成豁免（汇总过期时尤其误导）
+        m = re.match(rf"\s*(?:[|*-]\s*)?R-0*{n}\b", line)
         if m and _WAIVED_RE.search(line[m.end():]):
             return True
     return False
@@ -88,8 +91,13 @@ def _has_conclusion(text: str, n: int) -> bool:
         if not m:
             continue
         tail = line[m.end():]
-        if re.search(_CONCL_RE, tail, re.I) and not _NEGATE_RE.search(tail):
-            return True
+        # 只看结论词前面、同一分句里的否定词（早期按整行判，结论后的补充说明如「非本需求引入」
+        # 「未透传」会把「✅ 已验证」整行打成无结论，CP-58118 两次逼人改措辞迎合门禁）。
+        # 「不得判 PASS」「未通过」「待确认后判 PASS」仍然拦得住。
+        for c in re.finditer(_CONCL_RE, tail, re.I):
+            clause = re.split(r"[；。;，,|]", tail[:c.start()])[-1]
+            if not _NEGATE_RE.search(clause):
+                return True
     return False
 
 
@@ -147,7 +155,7 @@ HANDOVER_FINAL = {"已提测", "无需提测"}
 AC_RE = re.compile(r"\bAC-(\d{1,3})\b")
 R_RE = re.compile(r"\bR-(\d{1,3})\b")
 EVIDENCE_RE = re.compile(r"(证据[：:]|来源[：:]|待用户确认)")
-# 未取证的措辞：文档明令禁止（原则 21）
+# 未取证的措辞：文档明令禁止（核心原则 3「零臆测」）
 GUESS_RE = re.compile(r"(通常|一般来说|应该是|按惯例|大概是|估计是|想必)")
 
 
@@ -545,7 +553,7 @@ def refresh_dashboard(d: Path) -> None:
 
 
 def check_evidence_markers(d: Path, spec: dict) -> None:
-    """原则 21：事实判断必须带证据/来源标注，禁止「通常/应该是」这类措辞。"""
+    """核心原则 3（零臆测）：事实判断必须带证据/来源标注，禁止「通常/应该是」这类措辞。"""
     for step in (4, 6):
         if step not in spec:
             continue
@@ -556,7 +564,7 @@ def check_evidence_markers(d: Path, spec: dict) -> None:
         guesses = GUESS_RE.findall(text)
         if guesses:
             add(WARN, f"Step{step} 未取证措辞",
-                f"{f.name} 出现 {len(guesses)} 处「{'/'.join(sorted(set(guesses))[:4])}」，原则 21 禁止用推测替代取证")
+                f"{f.name} 出现 {len(guesses)} 处「{'/'.join(sorted(set(guesses))[:4])}」，核心原则 3（零臆测）禁止用推测替代取证")
         if not EVIDENCE_RE.search(text):
             add(WARN, f"Step{step} 证据标注",
                 f"{f.name} 通篇没有「证据：」/「来源：」/「待用户确认」标注")
@@ -774,6 +782,11 @@ def check_evidence_acceptance(d: Path, acs: list[int], wf: str) -> None:
         m = re.search(r"第\s*(\d+)\s*轮", p.name)
         return int(m.group(1)) if m else 1
     reports = [f] + sorted((p for p in d.glob(f.stem + "-*.md") if p != f), key=round_no)
+    # 复验报告若按轮次放在 tests/_acceptance/ 下（并行验收常见），按修改时间接在后面读；
+    # 只读主报告会让后续轮次的「验收通过」永远看不到（CP-58118 实际发生）
+    acc = d / "tests" / "_acceptance"
+    if acc.is_dir():
+        reports += sorted(acc.glob("*.md"), key=lambda p: p.stat().st_mtime)
     verdicts: dict[int, str] = {}
     for rf in reports:
         for line in read(rf).splitlines():
@@ -798,17 +811,161 @@ def check_evidence_acceptance(d: Path, acs: list[int], wf: str) -> None:
     if not (missing or false_done):
         add(OK, "证据验收", f"{len(verdicts)} 条 AC 均有判定，[done] 均已验收通过")
 
-def check_tasks_done(d: Path, wf: str, spec) -> None:
-    """编码步：tasks.md 不得留未勾选项（`- [ ]`）—— 没做完的任务要么做完勾上，要么写明取消 / 移交原因后勾上。"""
+# tasks.md 的「回归任务」组（承接回归验证清单）：回归单测 / mvn verify / 只读 SQL 在测试步做，
+# 前端回归项要写进测试交接文档（全局一致性步才产出）。放在编码步检查会出现「编码做完了，
+# 却要等交接文档写完编码步才变绿」—— 所以编码步只查编码任务组，回归组挪到交付门禁统一查。
+_REGRESSION_GROUP_RE = re.compile(r"^#{2,3}\s*\d*\.?\s*回归任务")
+
+
+
+# ------------------------------------------------------------ 多处记录的同步检查
+# 同一事实常被写在好几处（verify_state 状态 / RESULT 结论 / 回归清单行与汇总 / tasks 勾选 / 交接文档）。
+# 改动只落到其中一处、其余处静默过期 —— CP-58118 一轮里连续出了 6 次：AC-90 状态停在「部分」、
+# Step10 漏登记、复验报告放在 tests/_acceptance/ 门禁读不到、回归汇总停在旧数字、交接文档停在「前端未开发」。
+# 下面几项把「另一处也要改」从记忆变成断言。
+
+_RESULT_VERDICT_RE = re.compile(r"^- 结论[：:]\s*(.+)$", re.M)
+
+
+def _result_verdict(p: Path) -> str:
+    """RESULT.md 首个顶层「- 结论：」（忽略引用块里的历史结论），归一成 verify_state 的状态词。"""
+    m = _RESULT_VERDICT_RE.search(read(p))
+    if not m:
+        return ""
+    # 只看结论开头（图标 + 第一个词），括号里的补充说明（「失败分支未验」）不算结论
+    head = re.split(r"[（(：:，,；;]", m.group(1).strip(), 1)[0]
+    icon = {"✅": "通过", "❌": "失败", "⏭": "跳过", "⛔": "阻塞"}
+    for k, v in icon.items():
+        if head.startswith(k):
+            return v
+    for key in ("走读证据", "部分", "阻塞", "跳过", "失败", "通过"):
+        if key in head:
+            return key
+    return ""
+
+
+def check_state_vs_result(d: Path) -> None:
+    """tests/.verify-state.json 的用例状态必须与 tests/AC-NN/RESULT.md 的结论一致。
+
+    典型漏法：一条 AC 由两组接力验证，前一组登记「部分」，后一组补完写了 RESULT 却没回写状态；
+    或子 agent 按 brief 不动 verify_state，主会话收到汇报后也没回写。看板读的是状态，于是一直显示旧值。
+    """
+    p = d / "tests" / ".verify-state.json"
+    if not p.exists():
+        return
+    try:
+        cases = json.loads(read(p) or "{}").get("cases", {})
+    except json.JSONDecodeError:
+        return
+    bad = []
+    for ac, c in sorted(cases.items()):
+        r = d / "tests" / ac / "RESULT.md"
+        if not r.exists():
+            continue
+        rv, sv = _result_verdict(r), c.get("status", "")
+        if rv and sv and rv != sv:
+            bad.append(f"{ac}（状态={sv} / RESULT={rv}）")
+    if bad:
+        add(FAIL, "用例状态 vs RESULT", f"{len(bad)} 条不一致: {bad[:8]}（以 RESULT 为准回写 verify_state，或改 RESULT）")
+    else:
+        add(OK, "用例状态 vs RESULT", "verify_state 状态与各 RESULT.md 结论一致")
+
+
+def _expand_r_list(s: str) -> set[int]:
+    """「R-10、R-22 ~ R-30、R-31」→ {10, 22..30, 31}"""
+    out: set[int] = set()
+    for a, b in re.findall(r"R-0*(\d+)(?:\s*[~～\-–至]\s*R-0*(\d+))?", s):
+        out.update(range(int(a), int(b) + 1) if b else {int(a)})
+    return out
+
+
+def check_regression_summary(d: Path, wf: str, rs: list[int]) -> None:
+    """回归清单「汇总」段里手写的豁免列表必须与各行实际标 WAIVED 的项一致（汇总是手写的，行改了汇总常忘）。"""
+    f = d / REGRESSION_GLOB[wf]
+    if not f.exists():
+        return
+    text = read(f)
+    actual = {n for n in rs if _is_waived(text, n)}
+    for line in text.splitlines():
+        if re.match(r"\s*\|\s*R-\d", line) or "WAIVED" not in line.upper():
+            continue
+        m = re.search(r"(\d+)\s*项\s*\S*\s*WAIVED\s*[（(]([^）)]*)[）)]", line, re.I)
+        if not m:
+            continue
+        listed = _expand_r_list(m.group(2))
+        if listed != actual or int(m.group(1)) != len(actual):
+            add(FAIL, "回归清单 汇总",
+                f"汇总写 {m.group(1)} 项豁免 {sorted(listed)}，各行实际 {len(actual)} 项 {sorted(actual)}（按各行结论重算汇总）")
+        else:
+            add(OK, "回归清单 汇总", f"豁免 {len(actual)} 项，与各行一致")
+        return
+
+
+def check_handover_fresh(d: Path, wf: str) -> None:
+    """交接文档早于最后一次 AC 结论 / Checklist / 回归清单变更 → 很可能还停在旧口径（如「前端尚未开发」）。"""
+    f = d / HANDOVER_GLOB[wf]
+    if not f.exists():
+        return
+    srcs = [d / "Step 3-Checklist.md", d / REGRESSION_GLOB[wf]] + list((d / "tests").glob("AC-*/RESULT.md"))
+    srcs = [p for p in srcs if p.exists()]
+    if not srcs:
+        return
+    newest = max(srcs, key=lambda p: p.stat().st_mtime)
+    lag_h = (newest.stat().st_mtime - f.stat().st_mtime) / 3600
+    if lag_h > 1:
+        add(WARN, "测试交接文档 时效",
+            f"比 {newest.relative_to(d)} 早 {lag_h:.0f} 小时 —— 逐节核对账号 / 环境 / 回归 / 已知限制是否仍是当前口径，核对后保存一次")
+
+
+def check_earlier_steps(d: Path, wf: str, final_step: int) -> None:
+    """交付门禁：前序各步按「当前」产出物重跑一遍（不写状态）。
+
+    .workflow-state.json 里的绿灯只代表「登记那一刻」通过；之后改了 Checklist / 矩阵 / 回归清单，
+    旧绿灯不会自己变红（CP-58118：矩阵漏了后加的 AC-94，Step8 绿了两天）。
+    """
+    import os
+    if os.environ.get("VALIDATE_NO_RECHECK"):
+        return
+    env = dict(os.environ, VALIDATE_NO_RECHECK="1", PYTHONIOENCODING="utf-8")
+    bad = []
+    for s in range(1, final_step):
+        try:
+            out = subprocess.run([sys.executable, __file__, "--dir", str(d), "--workflow", wf, "--step", str(s)],
+                                 capture_output=True, text=True, encoding="utf-8", errors="replace",
+                                 env=env, timeout=120).stdout
+        except Exception as e:  # noqa: BLE001
+            bad.append(f"Step{s}: 复检未能运行（{e}）")
+            continue
+        bad += [f"Step{s}: {ln.strip()[2:].strip()[:80]}" for ln in out.splitlines() if ln.strip().startswith("❌") and "项未通过" not in ln]
+    if bad:
+        add(FAIL, "前序步骤复检", f"{len(bad)} 项按当前产出物已不通过（旧绿灯过期）: {bad[:6]}（修好后补跑该步 --record）")
+    else:
+        add(OK, "前序步骤复检", f"Step1~{final_step - 1} 按当前产出物全部通过")
+
+def check_tasks_done(d: Path, wf: str, spec, scope: str = "coding") -> None:
+    """tasks.md 不得留未勾选项（`- [ ]`）—— 没做完的任务要么做完勾上，要么写明取消 / 移交原因后勾上。
+
+    scope="coding"（编码步）：跳过「回归任务」组；scope="all"（交付门禁）：全部任务。
+    """
     hits = [h for g in spec[TASKS_STEP[wf]][1] for h in sorted(d.glob(g))]
     if not hits:
         return
     f = hits[0]
-    open_items = [l.strip()[:60] for l in read(f).splitlines() if re.match(r"^\s*[-*]\s*\[ \]", l)]
+    open_items, in_reg = [], False
+    for l in read(f).splitlines():
+        if re.match(r"^#{1,3}\s", l):
+            in_reg = bool(_REGRESSION_GROUP_RE.match(l))
+            continue
+        if scope == "coding" and in_reg:
+            continue
+        if re.match(r"^\s*[-*]\s*\[ \]", l):
+            open_items.append(l.strip()[:60])
+    label = "编码 tasks 完成度" if scope == "coding" else "交付门禁 tasks 完成度"
+    what = "编码任务（不含回归任务组，回归组在交付门禁查）" if scope == "coding" else "全部任务（含回归任务组）"
     if open_items:
-        add(FAIL, "编码 tasks 完成度", f"{f.name} 仍有 {len(open_items)} 项未勾选：{open_items[:5]}")
+        add(FAIL, label, f"{f.name} {what}仍有 {len(open_items)} 项未勾选：{open_items[:5]}")
     else:
-        add(OK, "编码 tasks 完成度", f"{f.name} 全部勾选")
+        add(OK, label, f"{f.name} {what}全部勾选")
 
 
 # ------------------------------------------------------------ 状态记录
@@ -863,7 +1020,9 @@ def print_status(d: Path, spec: dict) -> None:
         info = state["steps"].get(str(step))
         title = spec[step][0]
         if info is None:
-            print(f"  ○ Step{step:<3}{title}  未执行")
+            # 后面的步已登记、这一步却没有：多半是批量补登记时漏了，而不是真没做（CP-58118 Step10）
+            later = any(state["steps"].get(str(s), {}).get("passed") for s in spec if int(s) > int(step))
+            print(f"  ○ Step{step:<3}{title}  未执行" + ("  ⚠️ 后续步骤已登记，疑似漏登记：补跑 --step %s --record" % step if later else ""))
             continue
         tries = info.get("attempts", 1)
         suffix = f"  （第 {tries} 次尝试）" if tries > 1 else ""
@@ -886,7 +1045,18 @@ def print_status(d: Path, spec: dict) -> None:
 # ------------------------------------------------------------ skill 自检
 
 # 两个 workflow 共用、理应逐字一致的文件（内容与步号无关）
+# browser-playbook-tools-cdp.md 不在此列：§3 第 6/7 条（PacvueSelect、Vue 组件树）只适用前端，后端版有意不同步。
 SHARED_FILES = ["references/browser-verification-playbook.md",
+                "references/subagent-acceleration.md",
+                "references/context-compaction.md",
+                "scripts/dashboard/index.html",
+                "scripts/dashboard/app.css",
+                "scripts/dashboard/app.js",
+                "scripts/dashboard/pm.html",
+                "scripts/compact_resume.py",
+                "references/browser-playbook-core.md",
+                "references/browser-playbook-evidence.md",
+                "references/browser-playbook-parallel.md",
                 "references/evidence-acceptance.md",
                 "references/test-handover.md",
                 "references/lesson-harvest.md",
@@ -898,7 +1068,9 @@ SHARED_FILES = ["references/browser-verification-playbook.md",
                 "scripts/init_workdir.py",
                 "scripts/qa_record.py",
                 "scripts/checklist_jira.py",
-                "scripts/annotate.js",]
+                "scripts/annotate.js",
+                "scripts/surefire_aggregate.py",
+                "scripts/distribute.py",]
 SIBLING = {"ai-driven-fullstack-workflow": "ai-driven-backend-workflow",
            "ai-driven-backend-workflow": "ai-driven-fullstack-workflow"}
 
@@ -943,7 +1115,9 @@ def check_shared_drift(skill_dir: Path) -> None:
         la = [_norm_shared(x) for x in read(a).splitlines()]
         lb = [_norm_shared(x) for x in read(b).splitlines()]
         if la != lb:
-            n = sum(1 for x, y in zip(la, lb) if x != y) + abs(len(la) - len(lb))
+            # difflib 计真实差异行：zip 逐行比在中间插入一行后会把其后全部算成「不同」，数字严重夸大
+            n = sum(1 for x in difflib.unified_diff(la, lb, lineterm="", n=0)
+                    if x[:1] in "+-" and not x.startswith(("+++", "---")))
             drift.append(f"{rel}({n} 行不同)")
     if missing:
         add(WARN, "共用文件缺失", f"{missing} 在某一侧不存在")
@@ -1064,6 +1238,89 @@ def check_step_refs(skill_dir: Path) -> None:
         add(OK, "步号引用", f"{len(topic2num)} 个步骤称呼的引用全部对得上")
 
 
+def _skill_texts(skill_dir: Path):
+    """skill 自身的 .md / .py（跳过 __pycache__ 与体量巨大的看板脚本）。"""
+    for f in sorted(list(skill_dir.rglob("*.md")) + list(skill_dir.rglob("*.py"))):
+        if "__pycache__" in f.parts or f.name == "verify_dashboard.py":
+            continue
+        yield f, read(f)
+
+
+def check_principle_refs(skill_dir: Path) -> None:
+    """「原则 N」的 N 不得超过 SKILL.md 核心原则表的行数。
+
+    核心原则表重排过多次（曾有二十多条），老编号散落在正文与脚本里，
+    静默指向不存在或错误的条目 —— 与 LNN 错位是同一类事故。
+    """
+    sk = skill_dir / "SKILL.md"
+    if not sk.exists():
+        return
+    text = read(sk)
+    sec = text.split("## 核心原则", 1)[-1].split("\n## ", 1)[0]
+    rows = [int(n) for n in re.findall(r"^\|\s*(\d+)\s*\|", sec, re.MULTILINE)]
+    if not rows:
+        add(WARN, "原则编号引用", "SKILL.md 里没解析到核心原则表")
+        return
+    top = max(rows)
+    bad = []
+    for f, t in _skill_texts(skill_dir):
+        for i, line in enumerate(t.splitlines(), 1):
+            for m in re.finditer(r"(?:核心)?原则\s*(\d+)", line):
+                if int(m.group(1)) > top or int(m.group(1)) < 1:
+                    bad.append(f"{f.name}:{i} 原则 {m.group(1)}")
+    if bad:
+        add(FAIL, "原则编号引用", f"{bad[:8]} 超出核心原则表（共 {top} 条）—— 多半是表重排后没改引用")
+    else:
+        add(OK, "原则编号引用", f"全部落在 1..{top} 内")
+
+
+# 本 skill references/ 下文件名的前缀；只对这些名字做存在性检查（case.md / SCRIPTS.md 等外部名不查）
+_REF_PREFIXES = ("step-", "browser-", "doc-output", "data-reconciliation", "evidence-acceptance",
+                 "lesson", "test-handover", "bug-hunting", "figma-ui-cache", "openspec-integration",
+                 "scripts.md")
+
+
+def _section_ids(p: Path) -> set[str]:
+    """文件里所有标题的章节号（`## 4.`、`### 4.0`、`## 11.4`、`### 11.4.2` → 4 / 4.0 / 11.4 / 11.4.2）。"""
+    ids = set()
+    for m in re.finditer(r"^#{1,6}\s*(?:§\s*)?(\d+(?:\.\d+)*)[.\s]", read(p), re.MULTILINE):
+        ids.add(m.group(1))
+    return ids
+
+
+def check_reference_links(skill_dir: Path) -> None:
+    """`xxx.md` 引用指向的 reference 文件存在；`xxx.md §N` / `playbook §N` 的章节号能在目标里找到（尽力而为）。"""
+    ref = skill_dir / "references"
+    if not ref.exists():
+        return
+    names = {p.name for p in ref.glob("*.md")}
+    pb_files = sorted(ref.glob("browser-*.md"))
+    pb_ids = set().union(*(_section_ids(p) for p in pb_files)) if pb_files else set()
+    missing, bad_sec = [], []
+    file_pat = re.compile(r"`(?:references/)?([a-z0-9][a-z0-9\-]*\.md)`")
+    sec_pat = re.compile(r"(?:`(?:references/)?([a-z0-9][a-z0-9\-]*\.md)`|(playbook))\s*(?:的\s*)?§\s*(\d+(?:\.\d+)*)")
+    for f, t in _skill_texts(skill_dir):
+        for i, line in enumerate(t.splitlines(), 1):
+            for name in file_pat.findall(line):
+                if name.startswith(_REF_PREFIXES) and name not in names:
+                    missing.append(f"{f.name}:{i} → {name}")
+            for name, pb, sec in sec_pat.findall(line):
+                if pb:
+                    if pb_files and sec not in pb_ids:
+                        bad_sec.append(f"{f.name}:{i} playbook §{sec}")
+                elif name in names and name.startswith(_REF_PREFIXES):
+                    if sec not in _section_ids(ref / name):
+                        bad_sec.append(f"{f.name}:{i} {name} §{sec}")
+    if missing:
+        add(FAIL, "reference 文件引用", f"{missing[:8]}{f' …共 {len(missing)} 处' if len(missing) > 8 else ''} 目标不存在")
+    else:
+        add(OK, "reference 文件引用", "全部存在")
+    if bad_sec:
+        add(FAIL, "§ 章节引用", f"{bad_sec[:8]}{f' …共 {len(bad_sec)} 处' if len(bad_sec) > 8 else ''} 目标文件里找不到该章节号")
+    else:
+        add(OK, "§ 章节引用", "可解析的章节号全部存在")
+
+
 def check_bughunt_letter(skill_dir: Path) -> None:
     """缺陷猎捕清单标题里的维度序号，必须与 Review 步里实际的维度字母一致。"""
     cl = skill_dir / "references" / "bug-hunting-checklist.md"
@@ -1114,6 +1371,8 @@ def main() -> None:
         check_skill_self(skill_dir)
         check_step_refs(skill_dir)
         check_bughunt_letter(skill_dir)
+        check_principle_refs(skill_dir)
+        check_reference_links(skill_dir)
         check_shared_drift(skill_dir)
         icon = {OK: "✅", WARN: "⚠️ ", FAIL: "❌"}
         print("skill 自检 @ " + skill_dir.name)
@@ -1171,6 +1430,7 @@ def main() -> None:
         if step == TEST_STEP[args.workflow]:
             acs = acs or check_checklist(d, spec)
             check_tests_evidence(d, acs, args.workflow)
+            check_state_vs_result(d)
         if step in (4, 6):
             check_evidence_markers(d, spec)
         if step in (REVIEW_STEP[args.workflow], FINAL_STEP[args.workflow]):
@@ -1180,8 +1440,13 @@ def main() -> None:
             acs = acs or check_checklist(d, spec)
             rs = rs or check_regression(d, args.workflow)
             check_final_gate(d, acs, rs, args.workflow, spec)
+            check_tasks_done(d, args.workflow, spec, scope="all")
             check_handover(d, args.workflow)
+            check_handover_fresh(d, args.workflow)
             check_evidence_acceptance(d, acs, args.workflow)
+            check_state_vs_result(d)
+            check_regression_summary(d, args.workflow, rs)
+            check_earlier_steps(d, args.workflow, step)
         if step == HANDOVER_STEP[args.workflow]:
             check_ac_subtask_handover(d)
 

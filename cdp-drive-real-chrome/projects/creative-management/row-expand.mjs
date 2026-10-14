@@ -1,4 +1,4 @@
-// 用法: node expand.mjs key1 key2 ...  —— 幂等：滚到该行；若视觉上的下一行不是它的子层级，才真实点击展开箭头
+// 用法: CDP_TARGET=<id> node row-expand.mjs key1 key2 ...  —— 幂等：滚到该行；若视觉上的下一行不是它的子层级，才真实点击展开箭头
 import { connect } from "../../scripts/conn.mjs"; import fs from "node:fs"; const c = await connect();
 const click = async (p) => { for (const type of ["mouseMoved", "mousePressed", "mouseReleased"]) await c.send("Input.dispatchMouseEvent", { type, x: p.x, y: p.y, button: "left", clickCount: 1 }); };
 const top = fs.readFileSync(new URL("./row-to-top.js", import.meta.url), "utf8");

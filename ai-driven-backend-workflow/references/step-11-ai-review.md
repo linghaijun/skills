@@ -1,5 +1,7 @@
 # 第十一步：AI Review 需求回溯与代码合规审查
 
+> ⚡ **子 agent 加速**（先过 `subagent-acceleration.md` §1 三问，判断不了就不派）：AI Review：合规 / 缺陷猎捕 / lessons 可按维度拆给子 agent 并行，**主 agent 逐条复核后**才写进报告。
+
 > 本步验证"代码是否符合需求"（Checklist 回溯）。**仅审查，不提交**——提交统一在 Step12 全局一致性审查通过后进行。
 
 **输入**：Step 3-Checklist.md + Step 6-API接口定义文档.md + Step 7-单元测试验证指标矩阵.md + 全部业务代码 + 全部单测代码

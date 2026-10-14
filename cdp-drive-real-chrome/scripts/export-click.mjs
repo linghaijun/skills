@@ -1,13 +1,24 @@
+// ⛔ DEPRECATED（2026-10-13）：新用法一律 export-target.mjs（锁 CDP_TARGET、--dir 落盘、记录请求 / 状态码 / content-disposition）。
+//    本文件只为旧命令不失效而保留：它会设 1920x1080 视口覆盖、按全局选择器找第一个 i.pacvue-download-wrap（可能命中顶栏下载中心），
+//    且不给 CDP_TARGET 时连「第一个 URL 含 CreativeManagement 的标签」—— 并行时会点到别人的窗口。
+//
 // 放大视口 → 定位表格导出图标（i.pacvue-download-wrap）→ 真鼠标点击 → 抓导出请求与落盘文件
+//   [CDP_TARGET=<id>] [CDP_PORT=9222] node export-click.mjs [--dir <落盘目录>]
+//   落盘目录：--dir > CDP_DL_DIR > <系统临时目录>/cdp-downloads（原写死本机仓库 .workbuddy/tmp/downloads，已去掉）
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { pickPage } from "./conn.mjs";
 
-const PORT = 9222;
-const DL_DIR = "C:\\Users\\HaijunLing\\IdeaProjects\\creative-management-all\\.workbuddy\\tmp\\downloads";
+const argDir = (() => { const i = process.argv.indexOf("--dir"); return i >= 0 ? process.argv[i + 1] : null; })();
+const PORT = Number(process.env.CDP_PORT || 9222);
+const DL_DIR = path.resolve(argDir || process.env.CDP_DL_DIR || path.join(os.tmpdir(), "cdp-downloads"));
 fs.mkdirSync(DL_DIR, { recursive: true });
+console.error("[deprecated] export-click.mjs → 请改用 export-target.mjs；download dir = " + DL_DIR);
 
-const targets = await (await fetch(`http://127.0.0.1:${PORT}/json/list`)).json();
-const page = targets.find((t) => t.type === "page" && String(t.url).includes("CreativeManagement"));
-if (!page) { console.error("no page"); process.exit(3); }
+const targets = (await (await fetch(`http://127.0.0.1:${PORT}/json/list`)).json()).filter((t) => t.type === "page");
+let page;
+try { page = pickPage(targets, { match: process.env.CDP_MATCH || "CreativeManagement" }); } catch (e) { console.error("no page: " + e.message); process.exit(3); }
 
 const ws = new WebSocket(page.webSocketDebuggerUrl);
 let nextId = 1;
@@ -40,7 +51,7 @@ function send(method, params = {}, timeout = 180000) {
   return new Promise((resolve, reject) => {
     pending.set(id, { resolve, reject });
     ws.send(JSON.stringify({ id, method, params }));
-    setTimeout(() => { if (pending.has(id)) { pending.delete(id); reject(new Error("timeout " + method)); } }, timeout);
+    setTimeout(() => { if (pending.has(id)) { pending.delete(id); reject(new Error("timeout " + method)); } }, timeout).unref();
   });
 }
 

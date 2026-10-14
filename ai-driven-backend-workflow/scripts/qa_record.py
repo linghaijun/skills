@@ -38,11 +38,15 @@ from __future__ import annotations
 import argparse
 import csv
 import datetime
+import hashlib
 import io
 import json
 import os
 import re
 import sys
+import tempfile
+import threading
+import time
 from pathlib import Path
 
 RECORD = "Step 1-需求澄清问答记录.md"
@@ -67,11 +71,83 @@ def _read(p: Path) -> str:
     return p.read_text(encoding="utf-8-sig") if p.exists() else ""
 
 
+_LOCKS: dict = {}
+_LOCKS_GUARD = threading.Lock()
+
+
+def req_lock(req: Path) -> "threading.RLock":
+    """按需求目录的进程内可重入锁：看板保存 / 产品作答 / 分享 / 归档同一需求时串行，防止读改写交错丢数据。"""
+    key = os.path.normcase(str(Path(req).resolve()))
+    with _LOCKS_GUARD:
+        lk = _LOCKS.get(key)
+        if lk is None:
+            lk = _LOCKS[key] = threading.RLock()
+        return lk
+
+
+class RevConflict(Exception):
+    """保存时带的 rev 与磁盘不一致（别人已改过）—— 看板返回 409。"""
+
+
 def _atomic_write(p: Path, text: str) -> None:
-    tmp = p.with_suffix(p.suffix + ".tmp")
-    with open(tmp, "w", encoding="utf-8", newline="") as f:  # 保持 LF，别让 Windows 转成 CRLF 造成整文件 diff
-        f.write(text)
-    os.replace(tmp, p)
+    """同目录唯一临时文件 + os.replace：并发写不会互相踩同一个 .tmp，读者也永远读不到半截文件。"""
+    fd, tmp = tempfile.mkstemp(dir=str(p.parent), prefix=".", suffix=".tmp")  # 短名：深目录下别撞 MAX_PATH
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:  # 保持 LF，别让 Windows 转成 CRLF 造成整文件 diff
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        for i in range(6):  # Windows 上目标文件正被别的进程读时 replace 会短暂 PermissionError
+            try:
+                os.replace(tmp, p)
+                return
+            except PermissionError:
+                if i == 5:
+                    raise
+                time.sleep(0.05 * (i + 1))
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _backup_corrupt(p: Path) -> str:
+    """坏 JSON 不静默当空处理：改名为 <名>.corrupt-<时间戳> 留档，返回备份文件名。"""
+    bk = p.with_name(p.name + ".corrupt-" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S"))
+    try:
+        os.replace(p, bk)
+    except OSError:
+        return p.name
+    print(f"[qa_record] [warn] {p} 不是合法 JSON，已备份为 {bk.name}", file=sys.stderr)
+    return bk.name
+
+
+def _load_json_obj(req: Path, name: str, key: str) -> dict:
+    p = req / name
+    d: dict = {}
+    with req_lock(req):
+        if p.exists():
+            try:
+                d = json.loads(_read(p))
+                if not isinstance(d, dict):
+                    raise ValueError("顶层不是 JSON 对象")
+            except ValueError as e:  # JSONDecodeError / UnicodeDecodeError 都是 ValueError
+                d = {"corrupt": {"file": _backup_corrupt(p), "error": str(e)[:200]}}
+    if not isinstance(d.get(key), list):
+        d[key] = []
+    return d
+
+
+def corrupt_backups(req: Path) -> list:
+    """需求目录里残留的损坏备份（人工核对后删除即可消除看板红条）。"""
+    try:
+        return sorted(x.name for x in Path(req).iterdir()
+                      if x.is_file() and ".corrupt-" in x.name
+                      and x.name.split(".corrupt-")[0] in (CHANGES, SHARES))
+    except OSError:
+        return []
 
 
 # ------------------------------------------------------------ 解析
@@ -166,15 +242,33 @@ def render_question(q: dict) -> list[str]:
     return out
 
 
+def q_rev(q: dict) -> str:
+    """单题内容指纹（看板编辑时带上，保存时比对；只比本题，别人改其他题不算冲突）。"""
+    d = {k: q.get(k) for k in ("title",) + FIELDS}
+    d["options"] = q.get("options")
+    blob = json.dumps(d, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha1(blob.encode("utf-8")).hexdigest()[:12]
+
+
 def update_question(req: Path, qid: str, fields: dict, by: str = "dashboard",
-                    record_change: bool = True) -> dict:
-    """改一个问题的可编辑字段并写回 md；record_change 时登记一条「待确认」改动。"""
+                    record_change: bool = True, expect_rev=None) -> dict:
+    """改一个问题的可编辑字段并写回 md；record_change 时登记一条「待确认」改动。
+
+    expect_rev：调用方看到的该题 rev；与磁盘不一致抛 RevConflict（看板 409「已被他人修改」）。
+    """
+    with req_lock(req):
+        return _update_question(req, qid, fields, by, record_change, expect_rev)
+
+
+def _update_question(req: Path, qid: str, fields: dict, by: str, record_change: bool, expect_rev) -> dict:
     p = req / RECORD
     text = _read(p)
     data = parse(text)
     q = next((x for x in data["questions"] if x["id"] == qid), None)
     if q is None:
         raise KeyError(f"{qid} 不存在")
+    if expect_rev and q_rev(q) != expect_rev:
+        raise RevConflict(f"{qid} 已被他人修改，请刷新后再改")
     before = {k: q.get(k, "") for k in EDITABLE}
     for k, v in fields.items():
         if k not in EDITABLE:
@@ -204,23 +298,22 @@ def update_question(req: Path, qid: str, fields: dict, by: str = "dashboard",
 
 
 def _pub(q: dict) -> dict:
-    return {k: v for k, v in q.items() if k not in ("start", "end")}
+    d = {k: v for k, v in q.items() if k not in ("start", "end")}
+    d["rev"] = q_rev(q)
+    return d
 
 
 # ------------------------------------------------------------ 改动日志
 
 def load_changes(req: Path) -> dict:
-    p = req / CHANGES
-    try:
-        d = json.loads(_read(p)) if p.exists() else {}
-    except json.JSONDecodeError:
-        d = {}
-    d.setdefault("changes", [])
-    return d
+    """坏文件不再静默返回空：改名 .corrupt-<时间戳> 备份，返回里带 corrupt 信息（看板据此报红）。"""
+    return _load_json_obj(req, CHANGES, "changes")
 
 
 def save_changes(req: Path, d: dict) -> None:
-    _atomic_write(req / CHANGES, json.dumps(d, ensure_ascii=False, indent=2))
+    d = {k: v for k, v in d.items() if k != "corrupt"}
+    with req_lock(req):
+        _atomic_write(req / CHANGES, json.dumps(d, ensure_ascii=False, indent=2))
 
 
 def pending_changes(req: Path) -> list[dict]:
@@ -228,6 +321,11 @@ def pending_changes(req: Path) -> list[dict]:
 
 
 def resolve_change(req: Path, cid: str, status: str, note: str = "") -> dict:
+    with req_lock(req):
+        return _resolve_change(req, cid, status, note)
+
+
+def _resolve_change(req: Path, cid: str, status: str, note: str = "") -> dict:
     log = load_changes(req)
     c = next((x for x in log["changes"] if x["id"] == cid), None)
     if c is None:
@@ -249,17 +347,13 @@ SHARE_DAYS = 14
 
 
 def load_shares(req: Path) -> dict:
-    p = req / SHARES
-    try:
-        d = json.loads(_read(p)) if p.exists() else {}
-    except json.JSONDecodeError:
-        d = {}
-    d.setdefault("shares", [])
-    return d
+    return _load_json_obj(req, SHARES, "shares")
 
 
 def _save_shares(req: Path, d: dict) -> None:
-    _atomic_write(req / SHARES, json.dumps(d, ensure_ascii=False, indent=2))
+    d = {k: v for k, v in d.items() if k != "corrupt"}
+    with req_lock(req):
+        _atomic_write(req / SHARES, json.dumps(d, ensure_ascii=False, indent=2))
 
 
 def create_share(req: Path) -> dict:
@@ -272,26 +366,28 @@ def create_share(req: Path) -> dict:
     s = {"token": secrets.token_urlsafe(18), "qids": qids, "created_at": now.replace(microsecond=0).isoformat(),
          "expires_at": (now + datetime.timedelta(days=SHARE_DAYS)).replace(microsecond=0).isoformat(),
          "status": "active", "answers": []}
-    d = load_shares(req)
-    d["shares"].append(s)
-    _save_shares(req, d)
+    with req_lock(req):
+        d = load_shares(req)
+        d["shares"].append(s)
+        _save_shares(req, d)
     return s
 
 
 def revoke_share(req: Path, token: str) -> None:
-    d = load_shares(req)
-    for s in d["shares"]:
-        if s["token"] == token:
-            s["status"] = "revoked"
-            s["revoked_at"] = now_iso()
-    _save_shares(req, d)
+    with req_lock(req):
+        d = load_shares(req)
+        for s in d["shares"]:
+            if s.get("token") == token:
+                s["status"] = "revoked"
+                s["revoked_at"] = now_iso()
+        _save_shares(req, d)
 
 
 def find_share(req: Path, token: str):
     """令牌有效（未作废、未过期）则返回 share，否则 None。用常数时间比较。"""
     import hmac
     for s in load_shares(req)["shares"]:
-        if hmac.compare_digest(s["token"], token or ""):
+        if hmac.compare_digest(str(s.get("token", "")), token or ""):
             if s.get("status") != "active" or s.get("expires_at", "") < now_iso():
                 return None
             return s
@@ -315,6 +411,11 @@ def share_view(req: Path, share: dict) -> dict:
 
 def pm_answer(req: Path, token: str, qid: str, choice: str, text: str, name: str = "") -> dict:
     """产品在分享页作答：写回 md（状态 PM已确认）+ 登记待确认改动（by=pm:名字）。"""
+    with req_lock(req):
+        return _pm_answer(req, token, qid, choice, text, name)
+
+
+def _pm_answer(req: Path, token: str, qid: str, choice: str, text: str, name: str = "") -> dict:
     share = find_share(req, token)
     if share is None:
         raise PermissionError("链接已失效")

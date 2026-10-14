@@ -1,21 +1,24 @@
 // 执行「页面级 JS 模板」：把 __X__ 占位符替换成实参后交给 CDP 执行。
-// 为什么需要它：项目级脚本（.agents/browser-scripts/）写成带 __PARAM__ 占位符的模板，
+// 为什么需要它：页面级脚本（本目录 *.js）写成带 __PARAM__ 占位符的模板，
 //   免得每个脚本都自己解析一遍命令行参数，也免得手工 sed 替换。
 //
 // 用法:
-//   node run-page.mjs <script.js> --param FT=Video --param PT=Walmart [--param DO_RELOAD=false]
-//   node run-page.mjs <script.js> --json '{"FT":"Video","PT":"Walmart"}' --wait 25000
+//   CDP_TARGET=<id> node run-page.mjs <script.js> --param FILE_TYPE=Video --param PLATFORM=Walmart [--param DO_RELOAD=false]
+//   node run-page.mjs <script.js> --json '{"FILE_TYPE":"Video","PLATFORM":"Walmart"}' --wait 25000
 //   node run-page.mjs <script.js> --list          # 列出该模板需要的占位符
 //
-// 占位符映射规则（模板里写占位符，执行时传键名，不带下划线）:
-//   模板里的 __FILE_TYPE__  →  --param FT=Video
+// 占位符映射规则（模板里写占位符，执行时传「去掉前后双下划线」的同名键）:
+//   模板里的 __FILE_TYPE__  →  --param FILE_TYPE=Video
 //   模板里的 __DO_RELOAD__  →  --param DO_RELOAD=false
 //   模板里的 __WAIT__       →  --wait 25000     （特殊名，直接用 --wait）
 //
-// 值类型推断: "true"/"false" → 布尔, 纯数字 → 数字, 其它 → 字符串（自动加引号）
+// 值类型推断: "true"/"false" → 布尔, 纯数字 → 数字, 其它 → 字符串（自动加单引号）
+// 🔴 所以模板里占位符**不能带引号**：写 `const FT = __FILE_TYPE__;`，不要写 `const FT = "__FILE_TYPE__";`
+//    （后者替换后是 `"'Video'"`，值多一层引号 ⇒ 比较恒为假 ⇒ 轮询跑满 ⇒ 表现为 Runtime.evaluate 超时；见 README）
 //
-// 其它参数: --port(9222) --match(localhost:3001) --target --out(json 落盘) --timeout
+// 其它参数: --port(CDP_PORT/9222) --target(CDP_TARGET) --match(CDP_MATCH/localhost) --index --out(json 落盘) --timeout(90000)
 import fs from "node:fs";
+import { connect, cliTargetOpts } from "../../scripts/conn.mjs";
 
 function flag(name, dflt) {
   const i = process.argv.indexOf(name);
@@ -72,6 +75,12 @@ if (jsonIdx >= 0 && args[jsonIdx + 1]) {
   }
 }
 
+// 带引号的占位符写法会让值多一层引号（见上方 lit 注释）—— 告警但不阻断（旧模板可能仍这么写）
+{
+  const quoted = [...codeSrc.matchAll(/["']__([A-Z0-9_]+)__["']/g)].map((m) => m[1]);
+  if (quoted.length) console.error("WARN_QUOTED_PLACEHOLDER " + JSON.stringify([...new Set(quoted)]) + "：模板应写裸占位符 __X__，否则字符串值会多一层引号");
+}
+
 // __WAIT__ 特殊：--wait 直接给
 const WAIT = flag("--wait", "");
 if (WAIT !== "") params.WAIT = WAIT;
@@ -83,8 +92,9 @@ if (missing.length) {
   process.exit(2);
 }
 
-// 用单引号包裹：模板里写的是 `const X = "__X__"`（双引号），
-//   若替换值也带双引号就会变成 "const X = ""Video"";" —— 语法直接坏掉。
+// 字符串值由本函数加单引号（含单引号才退回 JSON.stringify 双引号转义）——
+//   所以模板里必须写裸占位符 `const X = __X__;`。若模板写成 `"__X__"`，替换后是 `"'Video'"`：
+//   语法不坏，但值多一层引号，比较恒为假（真因与「evaluate 超时」的表象无关，实测排查很久）。下方会对带引号的写法告警。
 const lit = (v) => {
   const s = String(v);
   if (s === "true" || s === "false") return s;
@@ -143,59 +153,15 @@ let expr = lines.join(NL);
   }
 }
 
-const PORT = Number(flag("--port", 9222));
-const MATCH = flag("--match", "");
-const TARGET = flag("--target", "");
 const OUT = flag("--out", "");
 const TIMEOUT = Number(flag("--timeout", 90000));
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const targets = await (await fetch(`http://127.0.0.1:${PORT}/json/list`)).json();
-const pages = targets.filter((t) => t.type === "page");
-let page;
-if (TARGET) {
-  page = pages.find((t) => t.id === TARGET);
-  if (!page) {
-    console.error("TARGET_NOT_FOUND", TARGET);
-    process.exit(2);
-  }
-} else page = (MATCH ? pages.find((t) => String(t.url).includes(MATCH)) : null) || pages[0];
-if (!page) {
-  console.error("NO_PAGE_TARGET");
-  process.exit(3);
-}
-
-const ws = new WebSocket(page.webSocketDebuggerUrl);
-let id = 1;
-const pend = new Map();
-ws.addEventListener("message", (ev) => {
-  const m = JSON.parse(ev.data);
-  if (m.id && pend.has(m.id)) {
-    const p = pend.get(m.id);
-    pend.delete(m.id);
-    m.error ? p.reject(new Error(JSON.stringify(m.error))) : p.resolve(m.result);
-  }
-});
-const send = (method, params = {}, timeout = TIMEOUT) =>
-  new Promise((resolve, reject) => {
-    const i = id++;
-    pend.set(i, { resolve, reject });
-    ws.send(JSON.stringify({ id: i, method, params }));
-    setTimeout(() => {
-      if (pend.has(i)) {
-        pend.delete(i);
-        reject(new Error("timeout " + method));
-      }
-    }, timeout);
-  });
-
-await new Promise((r, j) => {
-  ws.addEventListener("open", r, { once: true });
-  ws.addEventListener("error", j, { once: true });
-});
-try {
-  await send("Emulation.setFocusEmulationEnabled", { enabled: true });
-} catch {}
+// 连接与目标解析统一走 L0 conn.mjs：--target > CDP_TARGET > --match / CDP_MATCH（默认 localhost）；找不到直接报错，不再退回第一个 page
+let c;
+try { c = await connect(cliTargetOpts()); } catch (e) { console.error("NO_PAGE_TARGET " + e.message); process.exit(3); }
+const page = c.page;
+const send = c.send;
+// 焦点模拟（防后台节流）conn.mjs 已在同一连接开启
 
 console.error(`[run-page] ${SCRIPT} on ${page.url}`);
 const r = await send("Runtime.evaluate", {
@@ -203,7 +169,7 @@ const r = await send("Runtime.evaluate", {
   returnByValue: true,
   awaitPromise: true,
   userGesture: true,
-});
+}, TIMEOUT); // 模板在页面里等列表（20~42s）+ 轮询页签，默认给 90s
 if (r.exceptionDetails) {
   console.error("EVAL_THROW " + JSON.stringify(r.exceptionDetails).slice(0, 600));
   process.exit(3);
@@ -222,7 +188,5 @@ try {
 } catch {}
 console.log(shown);
 if (OUT) console.error("[run-page] saved -> " + OUT);
-try {
-  ws.close();
-} catch {}
+c.close();
 process.exit(0);

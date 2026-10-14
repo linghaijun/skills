@@ -4,7 +4,7 @@
 用途：把整页截图做成「一眼看出判定点」的标注版，作为 AC 判定依据的证据。
 
 用法：
-  python annotate.py 原图.png 输出-annotated.png \
+  python annotate.py AC-NN-01-<中文判定点>-原图.png AC-NN-01-<中文判定点>-标注.png \
       --crop 120,300,900,420 \
       --scale 2 \
       --box 40,60,220,36,1 \
@@ -24,10 +24,19 @@
   --title "文本"     顶部加一条说明带：编号 → 期望 → 对应 AC
   --color R,G,B     框线 / 编号 / 说明带颜色，默认红 255,0,0；禁止黑色、深灰（区分度低，脚本直接拒绝）
 
+证据图默认用法（--rects 模式，原 annotate-rects.py，2026-10-13 并入；annotate-rects.py 保留为薄包装）：
+  python annotate.py AC-08-01-第1页广告名称列-原图.png AC-08-01-第1页广告名称列-标注.png --crop 630,480,870,350 --title "AC-08 第 1 页" \
+      --rects rects.json --mark "dsp1_cell=ADSP：只有 Ad 名称" --mark "sd1_cell=SD：只有 Creative"
+  --rects FILE      页面导出的框坐标（截图像素 = CSS 像素 × dpr）：{"lab":[x0,y0,x1,y1]}，或 cdp.mjs 原始输出；
+                    值不是 4 个数字的键（*_text / page / dpr）自动忽略。必须与截图同帧导出（前后各一次、cmp 一致）
+  --mark "lab=说明" 按 rects 里的 lab 画框（框外扩 3px），编号接在 --box 之后；框超出 --crop 区直接报错，不静默裁掉
+  注意 --crop 在本脚本里是 x,y,w,h（annotate-rects.py 的位置参数是 x0,y0,x1,y1，包装层会换算）
+
 依赖：Pillow（本机 12.3.0）、字体 C:/Windows/Fonts/msyh.ttc（中文）或 arial.ttf
 最后跑通：2026-10-01
 """
 import argparse
+import json
 import os
 import sys
 
@@ -56,6 +65,16 @@ def parse_ints(s, n, name):
         sys.exit(f"--{name} 只能是整数: {s!r}")
 
 
+def load_rects(p):
+    """{lab:[x0,y0,x1,y1]}（截图像素），或 cdp.mjs 原始输出 {"result":{"value":"<json>"}}；值不是 4 个数字的键自动忽略。"""
+    with open(p, encoding="utf-8") as f:
+        data = json.load(f)
+    if isinstance(data, dict) and isinstance(data.get("result"), dict) and isinstance(data["result"].get("value"), str):
+        data = json.loads(data["result"]["value"])
+    return {k: v for k, v in data.items()
+            if isinstance(v, list) and len(v) == 4 and all(isinstance(n, (int, float)) for n in v)}
+
+
 def main():
     ap = argparse.ArgumentParser(description="截图标注：裁剪+放大+画框编号+说明条")
     ap.add_argument("src")
@@ -66,7 +85,33 @@ def main():
                     help="x,y,w,h,编号（裁剪后、放大前坐标），可重复")
     ap.add_argument("--title", help="顶部说明带文本")
     ap.add_argument("--color", default="255,0,0")
+    ap.add_argument("--rects", help="页面导出的框坐标 JSON（截图像素）：{lab:[x0,y0,x1,y1]} 或 cdp.mjs 原始输出")
+    ap.add_argument("--mark", action="append", default=[],
+                    help='"lab=框边说明"，按 --rects 里的 lab 画框（可重复；编号接在 --box 之后）')
     args = ap.parse_args()
+
+    # --rects 模式（原 annotate-rects.py 的能力，2026-10-13 并入）：页面坐标 → 裁剪后坐标，框外扩 3px；框超出裁剪区直接报错，不静默裁掉
+    if args.mark and not args.rects:
+        sys.exit("--mark 需要配 --rects")
+    if args.rects:
+        rects = load_rects(args.rects)
+        marks = [m.split("=", 1) if "=" in m else [m, ""] for m in args.mark]
+        missing = [lab for lab, _ in marks if lab not in rects]
+        if missing:
+            sys.exit(f"rects 里没有: {missing}；可用: {sorted(rects)[:20]}")
+        if args.crop:
+            cx0, cy0, cw, ch = parse_ints(args.crop, 4, "crop")
+        else:
+            with Image.open(args.src) as _im:
+                cx0, cy0, cw, ch = 0, 0, _im.width, _im.height
+        cx1, cy1 = cx0 + cw, cy0 + ch
+        start = len(args.box)
+        for i, (lab, txt) in enumerate(marks, start + 1):
+            x0, y0, x1, y1 = rects[lab]
+            bx, by = x0 - cx0 - 3, y0 - cy0 - 3
+            if bx < 0 or by < 0 or x1 > cx1 or y1 > cy1:
+                sys.exit(f"{lab} 超出裁剪区 x={cx0},y={cy0},w={cw},h={ch}: {rects[lab]}")
+            args.box.append(f"{int(bx)},{int(by)},{int(x1 - x0 + 6)},{int(y1 - y0 + 6)},{i},{txt}")
 
     if not os.path.exists(args.src):
         sys.exit(f"找不到原图: {args.src}")

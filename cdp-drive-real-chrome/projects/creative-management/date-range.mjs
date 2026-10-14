@@ -1,4 +1,4 @@
-// 用法: node setdate.mjs "05/01/2026~05/31/2026" out.json —— 记录切换过程中发出的 creative/ 请求（含请求体与响应摘要）
+// 用法: CDP_TARGET=<id> node date-range.mjs "05/01/2026~05/31/2026" out.json —— 记录切换过程中发出的 creative/ 请求（含请求体与响应摘要）
 import { connect } from "../../scripts/conn.mjs"; import fs from "node:fs";
 const [range, outFile] = process.argv.slice(2); const c = await connect();
 await c.send("Network.enable", { maxPostDataSize: 65536 }); const reqs = new Map();

@@ -3,12 +3,14 @@
 //   虚拟滚动只渲染可视区，分页/滚动验证必须靠本脚本收全量（否则「后 20 行有没有这条」无从判断）。
 //
 // 用法:
+//   CDP_TARGET=<id> node vtable-scroll.mjs --out rows.json [--max-rows 500]
 //   node vtable-scroll.mjs --port 9222 --match localhost:3001 --out rows.json [--max-rows 500]
 //
 // 参数:
-//   --port <n>      CDP 端口，默认 9222
-//   --target <id>   指定页面；不给则用 --match
-//   --match <sub>   按 URL 子串选 target
+//   --port <n>      CDP 端口，默认 CDP_PORT 或 9222
+//   --target <id>   指定页面；不给则读 CDP_TARGET（🔴 并行时必须给其一）
+//   --match <sub>   无 target 时按 URL 子串选 page，默认 CDP_MATCH 或 localhost；匹配不到报错
+//   --timeout <ms>  页面内整段采集的超时，默认 300000
 //   --out <path>    落盘 JSON（必填，否则行数多时上下文爆掉）
 //   --max-rows <n>  收集到 N 行就停，默认 500，防止无限滚动页跑飞
 //   --hold <ms>     每屏滚动后等待，默认 260（虚拟滚动的懒加载渲染需要时间）
@@ -23,14 +25,13 @@
 //  2. 滚动容器不一定是 body：优先取 scrollHeight 明显大于 clientHeight 且 overflowY 是 auto/scroll 的最近祖先。
 //  3. 步长别小于行高，否则会跳过整屏数据（漏行，且不报错 —— 最危险的一种漏）。
 import fs from "node:fs";
+import { connect, cliTargetOpts } from "./conn.mjs";
 
 function flag(name, dflt) {
   const i = process.argv.indexOf(name);
   return i >= 0 && process.argv[i + 1] ? process.argv[i + 1] : dflt;
 }
 
-const PORT = Number(flag("--port", 9222));
-const MATCH = flag("--match", "");
 const OUT = flag("--out", "");
 const MAX = Number(flag("--max-rows", 500));
 const HOLD = Number(flag("--hold", 260));
@@ -42,55 +43,10 @@ if (!OUT) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const targets = await (await fetch(`http://127.0.0.1:${PORT}/json/list`)).json();
-const pages = targets.filter((t) => t.type === "page");
-let page;
-const TARGET = flag("--target", "");
-if (TARGET) {
-  page = pages.find((t) => t.id === TARGET);
-  if (!page) {
-    console.error("TARGET_NOT_FOUND", TARGET);
-    process.exit(2);
-  }
-} else {
-  page = (MATCH ? pages.find((t) => String(t.url).includes(MATCH)) : null) || pages[0];
-}
-if (!page) {
-  console.error("NO_PAGE_TARGET");
-  process.exit(3);
-}
-
-const ws = new WebSocket(page.webSocketDebuggerUrl);
-let id = 1;
-const pend = new Map();
-ws.addEventListener("message", (ev) => {
-  const m = JSON.parse(ev.data);
-  if (m.id && pend.has(m.id)) {
-    const p = pend.get(m.id);
-    pend.delete(m.id);
-    m.error ? p.reject(new Error(JSON.stringify(m.error))) : p.resolve(m.result);
-  }
-});
-const send = (method, params = {}, timeout = 60000) =>
-  new Promise((resolve, reject) => {
-    const i = id++;
-    pend.set(i, { resolve, reject });
-    ws.send(JSON.stringify({ id: i, method, params }));
-    setTimeout(() => {
-      if (pend.has(i)) {
-        pend.delete(i);
-        reject(new Error("timeout " + method));
-      }
-    }, timeout);
-  });
-
-await new Promise((r, j) => {
-  ws.addEventListener("open", r, { once: true });
-  ws.addEventListener("error", j, { once: true });
-});
-try {
-  await send("Emulation.setFocusEmulationEnabled", { enabled: true });
-} catch {}
+// 连接与目标解析统一走 conn.mjs：--target > CDP_TARGET > --match / CDP_MATCH（默认 localhost）；找不到直接报错
+let c;
+try { c = await connect(cliTargetOpts()); } catch (e) { console.error("NO_PAGE_TARGET " + e.message); process.exit(3); }
+const send = c.send;
 
 // 整个采集逻辑在页面里跑（含 await），一次性返回，避免逐屏往返。
 const expr = `(async () => {
@@ -194,7 +150,8 @@ const expr = `(async () => {
   });
 })()`;
 
-const r = await send("Runtime.evaluate", { expression: expr, returnByValue: true, awaitPromise: true, userGesture: true });
+// 页面内整段滚动采集可能远超 30s（500 行 × 每屏 HOLD），显式给足超时
+const r = await send("Runtime.evaluate", { expression: expr, returnByValue: true, awaitPromise: true, userGesture: true }, Number(flag("--timeout", 300000)));
 if (r.exceptionDetails) {
   console.error("EVAL_THROW " + JSON.stringify(r.exceptionDetails).slice(0, 500));
   process.exit(3);
@@ -229,7 +186,5 @@ console.log(
     1
   )
 );
-try {
-  ws.close();
-} catch {}
+c.close();
 process.exit(0);

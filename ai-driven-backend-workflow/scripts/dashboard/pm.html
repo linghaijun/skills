@@ -1,0 +1,52 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>需求确认</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--fg:#1f2328;--muted:#6b7280;--line:#e5e7eb;--acc:#2563eb;--ok:#16a34a;--warn:#d97706;--err:#dc2626}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1216;--card:#171b21;--fg:#e6e8eb;--muted:#9aa4b1;--line:#2a313a;--acc:#60a5fa;--ok:#4ade80;--warn:#fbbf24;--err:#f87171}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.65 "Segoe UI","Microsoft YaHei",system-ui,sans-serif}
+main{max-width:900px;margin:0 auto;padding:20px 16px 60px}h1{font-size:20px;margin:0 0 4px}.muted{color:var(--muted)}.small{font-size:13px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin:14px 0}
+.card.done{border-left:4px solid var(--ok)}.head{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.qid{font-weight:800}.qt{font-weight:700;flex:1}
+.lab{font-size:12px;color:var(--muted);font-weight:600;margin:10px 0 4px}
+.opt{display:block;border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin:6px 0;cursor:pointer}
+.opt:hover{border-color:var(--acc)}.opt.on{border-color:var(--acc);background:rgba(37,99,235,.08)}
+textarea,input[type=text]{width:100%;font:inherit;color:var(--fg);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+textarea{min-height:80px}button{font:inherit;border:1px solid var(--acc);background:var(--acc);color:#fff;border-radius:8px;padding:7px 16px;cursor:pointer}
+button:disabled{opacity:.5;cursor:default}.badge{font-size:12px;border:1px solid;border-radius:999px;padding:1px 8px}
+.ok{color:var(--ok);border-color:var(--ok)}.wait{color:var(--warn);border-color:var(--warn)}.err{color:var(--err)}
+.top{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 18px}
+</style></head><body><main id="app"><div class="muted">加载中…</div></main>
+<script>
+const TOKEN=location.pathname.split('/').filter(Boolean).pop();
+let DATA=null,PICK={},MSG={},NAME='';try{NAME=localStorage.getItem('pm_name')||'';}catch(e){}
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function lines(s){return esc(s).split('\n').join('<br>');}
+async function load(){try{const r=await fetch('/pm/api/'+encodeURIComponent(TOKEN),{cache:'no-store'});const j=await r.json();
+ if(!r.ok||!j.ok)throw new Error(j.error||('HTTP '+r.status));DATA=j;render();}
+ catch(e){document.getElementById('app').innerHTML='<div class="card err">无法打开：'+esc(e.message)+'</div>';}}
+function render(){const qs=DATA.questions||[];const done=qs.filter(q=>q.status==='PM已确认').length;
+let h='<div class="top"><h1>需求确认</h1><div><b>'+esc(DATA.req_id)+'</b> '+esc(DATA.req_name)+'</div>'+
+'<div class="muted small">共 '+qs.length+' 个问题，已确认 '+done+' 个 · 链接有效期至 '+esc((DATA.expires_at||'').replace('T',' ').slice(0,16))+'</div>'+
+'<div class="lab">你的名字（选填，会记录在确认记录里）</div><input type="text" id="nm" value="'+esc(NAME)+'" oninput="NAME=this.value;try{localStorage.setItem(\'pm_name\',NAME)}catch(e){}" placeholder="例如 Linda"></div>';
+qs.forEach(q=>{const d=q.status==='PM已确认';const sel=PICK[q.id]!==undefined?PICK[q.id]:(q.picked||'');
+ h+='<div class="card'+(d?' done':'')+'"><div class="head"><span class="qid">'+esc(q.id)+'</span><span class="qt">'+esc(q.title)+'</span>'+
+ (d?'<span class="badge ok">已确认</span>':q.status==='待PM确认'?'<span class="badge wait">待确认</span>':'<span class="badge">'+esc(q.status)+'</span>')+'</div>'+
+ '<div class="lab">问题说明</div><div>'+lines(q.desc)+'</div><div class="lab">请选择</div>'+
+ q.options.map(o=>'<label class="opt'+(sel===o.key?' on':'')+'"><input type="radio" name="o-'+q.id+'" value="'+esc(o.key)+'"'+(sel===o.key?' checked':'')+
+   ' onchange="PICK[\''+q.id+'\']=this.value;render()"> <b>'+esc(o.key)+'.</b> '+lines(o.text)+'</label>').join('')+
+ '<label class="opt'+(sel==='自定义'?' on':'')+'"><input type="radio" name="o-'+q.id+'" value="自定义"'+(sel==='自定义'?' checked':'')+
+   ' onchange="PICK[\''+q.id+'\']=this.value;render()"> <b>自定义</b>（以上都不合适，直接写你的答复）</label>'+
+ '<div class="lab">'+(sel==='自定义'?'你的答复（必填）':'补充说明（选填）')+'</div><textarea id="t-'+q.id+'">'+esc(MSG[q.id]||(d&&q.picked==='自定义'?q.conclusion:''))+'</textarea>'+
+ '<div style="margin-top:10px;display:flex;gap:10px;align-items:center"><button onclick="submitQ(\''+q.id+'\')"'+(sel?'':' disabled')+'>'+(d?'修改确认':'确认')+'</button>'+
+ '<span class="small muted" id="s-'+q.id+'">'+(d?'已确认，可修改后重新提交':'')+'</span></div></div>';});
+document.getElementById('app').innerHTML=h;}
+async function submitQ(qid){const choice=PICK[qid]!==undefined?PICK[qid]:((DATA.questions.find(x=>x.id===qid)||{}).picked||'');
+const text=document.getElementById('t-'+qid).value;MSG[qid]=text;const st=document.getElementById('s-'+qid);
+if(choice==='自定义'&&!text.trim()){st.innerHTML='<span class="err">请填写你的答复</span>';return;}
+st.textContent='提交中…';
+try{const r=await fetch('/pm/api/'+encodeURIComponent(TOKEN)+'/answer',{method:'POST',headers:{'Content-Type':'application/json'},
+ body:JSON.stringify({qid,choice,text,name:NAME})});const j=await r.json();if(!r.ok||!j.ok)throw new Error(j.error||('HTTP '+r.status));
+ delete PICK[qid];delete MSG[qid];DATA=j.view;render();const s2=document.getElementById('s-'+qid);if(s2)s2.innerHTML='<span class="ok">已提交，谢谢！</span>';}
+catch(e){st.innerHTML='<span class="err">提交失败：'+esc(e.message)+'</span>';}}
+load();
+</script></body></html>

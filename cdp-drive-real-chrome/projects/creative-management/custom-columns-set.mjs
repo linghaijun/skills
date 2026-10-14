@@ -1,6 +1,10 @@
-// 用法: node ccset.mjs outDir "Video:Views at 25%,6-second Views" "Traffic:PDPV Rate" ... —— 打开 Custom Columns，真实点击勾选（已勾的跳过），Apply
+// 用法: CDP_TARGET=<id> node custom-columns-set.mjs outDir "Video:Views at 25%,6-second Views" "Traffic:PDPV Rate" ... [--prefix fix-r1-]
+//   —— 打开 Custom Columns，真实点击勾选（已勾的跳过），Apply
+//   产出 <outDir>/<prefix>cc-<分类>.png、<outDir>/<prefix>cc-log.json；--prefix 默认 fix-r1-（与旧文件名一致，2026-10-13 起可改）
+//   🔴 Apply = 改持久化列偏好（localStorage，同实例所有标签共享）→ 并行时只能在「写偏好」组里串行跑
 import { connect } from "../../scripts/conn.mjs"; import fs from "node:fs";
-const [E, ...specs] = process.argv.slice(2); const c = await connect();
+const _a = process.argv.slice(2); const _pi = _a.indexOf("--prefix"); const PREFIX = _pi >= 0 ? _a[_pi + 1] : "fix-r1-";
+const [E, ...specs] = _pi >= 0 ? _a.filter((x, i) => i !== _pi && i !== _pi + 1) : _a; const c = await connect();
 const click = async (p) => { for (const type of ["mouseMoved", "mousePressed", "mouseReleased"]) await c.send("Input.dispatchMouseEvent", { type, x: p.x, y: p.y, button: "left", clickCount: 1 }); };
 const shot = async (f) => { const s = await c.send("Page.captureScreenshot", { format: "png" }); fs.writeFileSync(f, Buffer.from(s.data, "base64")); };
 const DLG = `[...document.querySelectorAll('.el-dialog')].find(e => e.getBoundingClientRect().width > 0 && /Custom Columns/.test(e.innerText))`;
@@ -19,9 +23,9 @@ for (const spec of specs) { const [cat, list] = spec.split(":");
     if (b.checked) { log.push(name + ": already checked"); continue; }
     await click(b); await c.sleep(600); log.push(name + ": clicked");
   }
-  await shot(`${E}/fix-r1-cc-${cat}.png`);
+  await shot(`${E}/${PREFIX}cc-${cat}.png`);
 }
 const state = await c.ev(`(() => { const dlg = ${DLG}; const lines = dlg.innerText.split(String.fromCharCode(10)).map(s=>s.trim()).filter(Boolean); return lines.find(l => l.startsWith('Selected')); })()`);
 const ap = await c.ev(`(() => { const b = [...(${DLG}).querySelectorAll('button')].find(b => b.innerText.trim() === 'Apply'); const r = b.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
 await click(ap); await c.sleep(2500);
-fs.writeFileSync(`${E}/fix-r1-cc-log.json`, JSON.stringify({ specs, log, selected: state }, null, 1)); console.log(JSON.stringify({ log, selected: state })); c.close();
+fs.writeFileSync(`${E}/${PREFIX}cc-log.json`, JSON.stringify({ specs, log, selected: state }, null, 1)); console.log(JSON.stringify({ log, selected: state })); c.close();

@@ -1,6 +1,6 @@
 """AC-17 导出文件逐行解析（去标识化）。
 
-用法：python -I parse_export.py <xlsx> <输出前缀>
+用法：python -I export-parse.py <xlsx> <输出前缀>
 产出：
   <前缀>-rows.csv     每个数据行一行：行号、Ad Type、Ad 列是否含 `ID:`、是否等于 `Creative`、Ad 列文字哈希（sha1 前 10 位）、
                       Ad 列行数、各列锚定图片数（img_c0 / img_c1 …，Excel 0 基列号）

@@ -65,7 +65,7 @@ python scripts/handover_match.py \
 问用户（二选一，必须明确）：
 
 > 映射已完成。是否提测？
-> - **提测**：将把下列 Sub-task 转到 **Testing**，并转给 **biao.mu@pacvue.com**
+> - **提测**：将把下列 Sub-task 转到 **Testing**，并转给 **项目 `AGENTS.md`「AI-driven workflow 项目约定」里的提测转交人**（汇报时写出具体邮箱）
 > - **不提测**：本需求提测状态记为 **无需提测**（终态，不改 Jira）
 
 未获明确答复前**禁止**改 Jira。
@@ -76,7 +76,7 @@ python scripts/handover_match.py \
 
 1. `listJiraIssueTransitions` → 选**目标状态名为 Testing**（或站点等价名，如 `Testing` / `测试中`）的 transition；拿不准先列给用户
 2. `transitionJiraIssue` 执行该 transition
-3. `lookupJiraAccountId`（或 `listJiraIssueAssignableUsers`）解析 `biao.mu@pacvue.com` → `editJiraIssue` 设 `assignee`
+3. `lookupJiraAccountId`（或 `listJiraIssueAssignableUsers`）解析转交人邮箱 → `editJiraIssue` 设 `assignee`
 4. 每条结果写入 `.handover-state.json` 的 `jiraActions` 与映射报告「提测执行」节
 
 然后：
@@ -87,7 +87,8 @@ python scripts/handover_state.py decide --dir <develop> --status 已提测
 
 部分失败：报告里列失败 key + 原因；状态仍可标 `已提测`，但必须注明「部分失败，须人工补」；**不得假装全成功**。
 
-默认转交人：`biao.mu@pacvue.com`。用户当次指定其他人则以当次为准。
+默认转交人按项目 `AGENTS.md`「AI-driven workflow 项目约定」；用户当次指定其他人则以当次为准。
+⚠️ `scripts/handover_state.py` 的 `DEFAULT_ASSIGNEE` 仍写死为 creative-management 的转交人，其他项目调用时用 `--assignee <邮箱>` 显式传入。
 
 ### 5b. 用户明确不提测
 

@@ -1,4 +1,4 @@
-// 用法: node colrect.mjs out.json "lab=dataIndex|表头文字[|maxRows]" ...  —— 表头 + 可见单元格外接框（截图像素）
+// 用法: CDP_TARGET=<id> node col-rect.mjs out.json "lab=dataIndex|表头文字[|maxRows]" ...  —— 表头 + 可见单元格外接框（截图像素）
 import { connect } from "../../scripts/conn.mjs"; import fs from "node:fs";
 const c = await connect(); const out = {};
 for (const a of process.argv.slice(3)) { const i = a.indexOf("="); const lab = a.slice(0, i); const [di, title, maxRows] = a.slice(i + 1).split("|");

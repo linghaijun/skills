@@ -202,7 +202,7 @@
 
 1. **默认结论是「本次无新增经验」** —— 没有实际发生的损失就没有条目，禁止预测性立法
 2. **经验不一定落在本文件** —— 落点由「执行到它该生效的那一刻，AI 正在读哪个文件」决定：
-   浏览器手法进 `browser-verification-playbook.md`、检查项进 `bug-hunting-checklist.md`、
+   浏览器手法进对应的 `browser-playbook-*.md`（索引 `browser-verification-playbook.md`）、检查项进 `bug-hunting-checklist.md`、
    某步做法进该步 `step-NN-*.md`；本文件只收**跨步骤的原则**和**必须讲清「为什么」**的条目
 3. **本文件硬上限 20 条**（同族按 1 条计）；满了要新增必须**同时提名一条淘汰或合并**，由用户裁决，
    禁止静默挤占。项目级事实不进本文件，进仓库 `AGENTS.md`

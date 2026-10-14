@@ -1,10 +1,12 @@
+# ⛔ DEPRECATED（2026-10-13）：图例版不合 workflow playbook §4.1「框边必须写字」，验收证据会判 C2 不过（CP-58252 第 5 轮退回两条 AC）。
+#    验收证据一律用 annotate.py --rects/--mark（或旧命令 annotate-rects.py）；本文件只为非验收用途的示意图与旧命令保留。
 # L0 证据标注图（图例版）：框上只画编号，标题与每条说明放在图片下方的图例条，不遮挡页面内容
 #
 #   python annotate-legend.py raw.png rects.json out.png "标题" "lab1=说明1" "lab2=说明2" ...
 #
 # rects.json：{ "lab": [x0, y0, x1, y1], ... }，**截图像素**坐标（= CSS 像素 × devicePixelRatio）。
 #   必须从页面导出（getBoundingClientRect × dpr），且与截图**同一状态**（同滚动位置、同视口）—— 肉眼量必错。
-#   L1 的 cells.mjs / colrect.mjs 会直接产出这种 rects.json。
+#   L1 的 cells.mjs / col-rect.mjs 会直接产出这种 rects.json。
 #
 # 为什么不把说明文字画在框旁边：实测框多了以后文字压住相邻单元格（恰恰是判定点），
 #   且框靠近图边时文字被裁掉。编号 + 图例条两个问题都没有。

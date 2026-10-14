@@ -23,7 +23,7 @@
 框边文字不要省：只有框和序号，复核者还得回说明带对编号。
 写**看得见的事实或期望**，不要写推断。
 
-依赖：Pillow（带 PIL 的 python: C:/Users/HaijunLing/AppData/Local/Programs/Python/Python314/python.exe）
+依赖：Pillow（用装了 PIL 的 python 运行即可；脚本内如需再调 python 一律用 sys.executable，不写死解释器路径）
 最后跑通：2026-10-09
 """
 import argparse

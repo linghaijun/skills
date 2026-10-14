@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-"""对 vue-group.mjs 导出的行模型做父子/重算校验（原始数值，非展示串）。
-用法: python verify-model.py model-key8.json
+"""对 model-group.mjs 导出的行模型做父子/重算校验（原始数值，非展示串）。
+用法: python groupby-model-check.py model-key8.json
 """
 import json, sys
 

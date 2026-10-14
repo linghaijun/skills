@@ -27,7 +27,7 @@ python scripts/distribute.py --dry-run     # ① 先看目标列表，确认数�
 python scripts/distribute.py               # ② 正式分发，逐文件 MD5 校验
 ```
 
-分发别的 skill（默认分发两个 workflow skill + `cdp-drive-real-chrome` + 本 skill 自身，自身放最后）：
+分发别的 skill（默认分发两个 workflow + `cdp-drive-real-chrome` + `debugging-systematic-jira` + 本 skill 自身，自身放最后）：
 
 ```bash
 python scripts/distribute.py --skill pacvue-common-utils --skill creativehub-integrating-migration-platform --dry-run
@@ -35,14 +35,15 @@ python scripts/distribute.py --skill pacvue-common-utils --skill creativehub-int
 
 | 参数 | 作用 |
 |---|---|
-| `--skill NAME` | 要分发的 skill，可多次；不传则用默认组（两个 workflow skill + `cdp-drive-real-chrome` + `distribute-agent-skills`） |
-| `--dry-run` | 只列目标不复制。**第一次跑、或改过排除规则后，必须先跑这个** |
+| `--skill NAME` | 要分发的 skill，可多次；不传则用默认组（两个 workflow + `cdp-drive-real-chrome` + `debugging-systematic-jira` + `distribute-agent-skills`） |
+| `--dry-run` | 只列目标和「被别处改过」的冲突，不复制。**第一次跑、或改过排除规则后，必须先跑这个** |
+| `--force` | 目标在上次分发后被别处改过也照样覆盖（**先确认那些改动不要了**；新增文件仍不删） |
 | `--src DIR` | 源 skills 目录，默认本脚本所在 skill 的上级目录（即 `~/.claude/skills`） |
 | `--home DIR` | 搜索根目录，默认用户目录 |
 | `--exclude GLOB` | 额外排除的目标目录 glob，可多次 |
 | `--include-repos` | 连 `IdeaProjects/` 下各仓库内的 skill 副本一起更新（见下方红线） |
-| `--include-skills-repo` | 连 `IdeaProjects/skills` 这个 skills 仓库一起更新（只放开这一个；`skills - Copy` 等备份仍排除） |
-| `--commit-skills-repo` | 分发后在 `IdeaProjects/skills` 里**本地 commit** 本次分发的 skill 目录（只提交这些路径，不动仓库里其他改动；MD5 不一致则不提交）。**永不 push**。需配合 `--include-skills-repo` |
+| `--include-skills-repo` / `--no-include-skills-repo` | **默认开**：同步 `IdeaProjects/skills` 本仓库；关掉用 `--no-include-skills-repo`（`skills - Copy` 等备份始终排除） |
+| `--commit-skills-repo` | 分发后在 `IdeaProjects/skills` 里**本地 commit** 本次分发的 skill 目录（只提交这些路径，不动仓库里其他改动；MD5 不一致则不提交）。**永不 push** |
 
 ## 目标是怎么选出来的（别手工拷）
 
@@ -53,20 +54,36 @@ python scripts/distribute.py --skill pacvue-common-utils --skill creativehub-int
   同一工具下两个 workflow 版本不一致比旧版更难查
 - 只认目录名为 `skills` 的：`~/.trae-cn/worktrees` 下有同名 git 工作区，不是安装目录
 
-### 始终排除，不接受「这次特殊」
+### 排除与例外
 
-| 排除项 | 为什么 |
+| 路径 | 规则 |
 |---|---|
-| 源目录本身 | 自己拷自己 |
-| `IdeaProjects/skills*` | 用户的独立副本 / 备份。**备份被自动覆盖就不再是备份**。唯一例外是 `IdeaProjects/skills` 本仓库，需显式 `--include-skills-repo` |
-| `IdeaProjects/` 下各仓库内的 `.claude/skills` | 它们**随仓库提交**，同步 = 产生 git 改动。要不要同步是逐仓决定的事，需要时用户同意后加 `--include-repos` |
-| `ai.opencode.desktop` | 只有旧版、从未参与分发，未经用户确认不覆盖 |
+| 源目录本身 | 始终排除（自己拷自己） |
+| `IdeaProjects/skills`（本仓库） | **默认纳入**；关掉用 `--no-include-skills-repo` |
+| `IdeaProjects/skills*` 备份（如 `skills - Copy`） | 始终排除（备份被覆盖就不再是备份） |
+| `IdeaProjects/` 下各仓库内的 `.claude/skills` | 默认排除；要同步加 `--include-repos` |
+| `ai.opencode.desktop` | 始终排除（未经确认不覆盖） |
 
 ## 只覆盖，不删除
 
 🔴 **脚本永远不删除目标里的文件。** 源里删掉、目标里还留着的，结尾会列成「残留」，
 **只提示不动手**：删除可能被权限拦，更可能删掉对方工具的本地改动。
 看到残留列表自己判断 —— 常见原因是某个 reference / script 被重命名或抽成了独立 skill。
+
+## 🔴 复制前先查「目标被别处改过」（退出码 3 = 停下问用户）
+
+其他 agent 工具（Cursor 等）的会话可能直接改了它自己目录下的 skill 副本。直接覆盖 = 那边的改动**永久丢失**
+（2026-10-14 实际发生：另一个会话在 `~/.cursor/skills/` 的 `creativehub-drive.mjs` 里加了函数，分发用源版本覆盖，无法恢复）。
+所以复制前逐个目标检查，命中任一条就**一个文件都不复制**，列清单后退出码 3：
+
+| 类型 | 判定 |
+|---|---|
+| 改动 | 目标文件内容与源不同（忽略 CRLF / LF），且在**上次分发到该目标之后**被修改过 |
+| 新增 | 目标里有、源里没有的文件，且是上次分发之后才出现的 |
+
+- 上次分发时间记在本 skill 的 `.last-distribute.json`（本机状态，不参与分发）；没有记录时「改动」按「目标比源新」判断，「新增」只在结尾列为残留、不拦
+- 收到退出码 3：**把清单贴给用户**，问清每个文件要不要 —— 要的先合回源 skill（`~/.claude/skills/<skill>/`）再分发；确认不要才加 `--force`
+- 别为了让分发跑通而直接加 `--force`
 
 ## 怎么算分发成功
 

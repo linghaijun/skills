@@ -54,14 +54,16 @@ UI 截图如有放入 `UI/` 子目录，Checklist 与前端设计文档中以相
 ```
 docs/develop/{Sprint}-{需求id}-{需求title}/
 └── tests/
-    ├── README.md                 # 索引：AC-NN → 结论 → 证据（Step11 收尾时生成）
-    ├── .verify-state.json        # 用例状态登记：多会话/多浏览器并行时谁在验哪条、用哪个窗口（11.4；状态「验证中」= 已被占用）
+    ├── README.md                 # 索引：顶部「进场检查」小节 + AC-NN → 结论 → 用例 → 复跑入口 → 证据（Step11 收尾时生成）
+    ├── .verify-state.json        # 用例状态登记：多会话/多浏览器并行时谁在验哪条、用哪个窗口（11.4；「验证中」= 已被占用）+ 证据终验（11.6）
+    ├── _unit/<批次>/             # 单测原件：当次 surefire TEST-*.xml 全集 + 按 classname 聚合计数与 md5（surefire_aggregate.py）；引用单测作 AC 证据时必须有
     ├── AC-01/
-    │   ├── case.md               # 验的是什么：指向 Checklist 原文 + 轨道说明
-    │   ├── script/               # 【自动化轨】可直接执行的脚本原件（与 REPLAY.md 二选一）
-    │   ├── REPLAY.md             # 【复跑入口】怎么再跑一遍 —— 命令 / SQL / 操作步骤
-    │   ├── evidence/             # 【硬证据】当时的真实输出，与 REPLAY 的小节一一对应
-    │   └── RESULT.md             # 结论：通过/BLOCKED + 环境 + 指向上面两者
+    │   ├── case.md               # 验的是什么：Checklist 原文逐字内嵌 + 轨道 + 优先级（GWT / 步骤 / 预期）
+    │   ├── script/               # 【自动化轨】可直接执行的脚本原件（后端单测复跑入口 / 接口脚本；产出过证据的补丁 / 采样 / 标注脚本也放这）—— 与 REPLAY.md 二选一
+    │   ├── REPLAY.md             # 【复跑入口 / Agent 实机验证轨】怎么再跑一遍 —— 命令 / SQL / 环境·账号·前置数据·编号操作步骤·预期 XHR
+    │   ├── evidence/             # 【硬证据】当时的真实输出，与 REPLAY 的小节一一对应：截图 .png / 录屏 .mp4|.webm|.gif / 抓包 .har|.json / 查询结果 / 日志 .log
+    │   ├── NOTES.md              # （可选）过程笔记：断言清单逐句打勾、「用时约 N 分钟」（verify_state.py backfill-duration 读它回填耗时）
+    │   └── RESULT.md             # 结论：通过/失败/阻塞/部分 + 环境 + 复跑入口 + 证据清单 + 本轮 marker 或 tabId，指向上面几者
     └── AC-02/
 ```
 
@@ -215,13 +217,23 @@ docs/develop/{Sprint}-{需求id}-{需求title}/
 
 #### 其它
 
-- 证据文件命名 `{AC-N}-{序号}-{描述}.{ext}`；同一 AC 多轮执行在 `RESULT.md` 标注轮次与环境，**不覆盖旧证据**。
+- 🔴 **证据文件命名（用户硬要求：文件名内容用中文）**：`AC-NN-序号-<中文描述>-<类型>.<ext>`
+  - **中文描述**写这张图 / 这段录屏证明的判定点，读文件名就知道看什么（≤ 30 字），例：`第1页广告名称列只显示Ad名称`、`进度停在100%约0.5秒`
+  - **类型后缀**用中文：`-原图`（整页原始截图）/ `-标注`（裁剪 + 放大 + 框 + 框边文字的标注版）/ `-录屏` / `-动图`；原图与标注图**同一序号成对**
+  - 例：`AC-08-01-第1页广告名称列只显示Ad名称-原图.png` + `AC-08-01-第1页广告名称列只显示Ad名称-标注.png`；多轮复验加轮次前缀 `AC-94-r6-03-进度停在100%约0.5秒-标注.png`
+  - 只有标识符保持原样：`AC-NN`、`rN` 轮次、jobId、字段名、接口路径、页面上的英文 UI 文案
+  - Windows 文件名禁用 `\ / : * ? " < > |`，遇到就删掉或换全角
+  - 旧证据里的 `-annotated` / 英文描述**不用回头改名**（验收照认），新产出一律按本条
+  - 同一 AC 多轮执行在 `RESULT.md` 标注轮次与环境，**不覆盖旧证据**。
+- 💡 **建议：证据文档用中文**（建议项，不进门禁、验收不因此判不通过）：`case.md` / `RESULT.md` / `REPLAY.md` / `NOTES.md` / `tests/README.md` 及验收报告的**标题、小节名、正文、表头、结论词**都用中文
+  （如「验收原文」「复跑步骤」「结论：通过 / 失败 / 阻塞 / 部分」，不写 `Result` / `Steps` / `PASS` / `Evidence`）；截图标注文字同样用中文（文件名是硬要求，见上一条「证据文件命名」）。
+  **保留英文 / 数字的只有标识符**：`AC-NN` / `R-NN` / `Q-NN` / `D-NN` 编号、`-r6-` 等轮次前缀、Jira 号、接口路径、字段名、类名 / 方法名、代码与日志原文、页面上的英文 UI 文案（按原样引用）。
 - `docs/develop` 已被 `.gitignore` 忽略 → 图片/视频放这里不污染仓库，可放心存大文件。
 - **别和仓库内的测试代码混淆**：单测**本体**仍放 `**/src/test/java/...`（不进 docs）；
   本目录放的是**用例 + 复跑入口 + 证据**。
-- **没有留证的 AC = 没测**：Step11 自检与 Step12/Step13 审查都按 `tests/AC-N/` 是否齐全判定。
+- **没有留证的 AC = 没测**：Step11 自检与 Step12/Step13 审查都按 `tests/AC-NN/` 是否齐全判定。
 
-### 验证进度看板（自动产出，Step11.4 收尾、11.6 终验后刷新）
+### 验证进度看板（自动产出：每条 AC 登记后自动刷新；Step11.4 收尾、11.6 终验后再刷一次）
 
 ```
 docs/develop/<需求目录>/验证进度看板.html   # 单需求看板（含整体进度/用例状态/证据/耗时/证据终验）
@@ -230,12 +242,13 @@ docs/develop/index.html                     # 外层总览：所有进行中需�
 
 - 生成（同时刷新外层总览）：`python scripts/verify_dashboard.py --dir docs/develop/<需求目录>`
 - 只重建外层总览：`python scripts/verify_dashboard.py --all --develop docs/develop`
-- 直达某需求详情：`index.html#/<需求目录>`（可直接书签/分享）；详情页左上角「← 全部需求」返回总览
-- **实时刷新**：页面每 5s 轮询 `tests/.verify-state.json`。**须经 http 打开**（`--serve`，或 `python -m http.server 8787 --directory docs/develop`）；`file://` 双击时浏览器拦截本地 fetch，自动降级为「生成时快照」并提示横幅。
-- **实时 vs 快照**：实时的只有用例状态 / 会话 / 窗口 / 时间戳（即 registry）；**证据清单、Checklist、流程步骤、回归项是快照**，新增证据后需重跑生成器刷新。
+- 直达某需求详情：`index.html#/<URL 编码后的需求目录>`（目录名含中文和空格，不编码链接点不开；可直接书签/分享）；详情页左上角「← 全部需求」返回总览
+- 🔴 **打开方式：一律服务模式**（与 SKILL.md 执行指令 1.5 同口径）：先探测 `http://127.0.0.1:8787/api/ping`，通 = 常驻服务已在；不通再起 `verify_dashboard.py --all --develop docs/develop --serve --port 8787`。服务模式下每次请求现场解析磁盘（内容实时）、「需求问答」页签可编辑保存、需求可归档。
+  `python -m http.server 8787 --directory docs/develop` 或 `file://` 双击**只作服务起不来时的只读降级**：**不能保存、不能归档**；只有用例状态 registry 每 5s 轮询 `tests/.verify-state.json` 实时刷新，证据清单 / Checklist / 流程步骤 / 回归项是生成时快照；`file://` 下浏览器还会拦截本地 fetch，整页降级为「生成时快照」并提示横幅。
+- 🔴 **刷新时机**：`verify_state.py` 的 `claim` / `fix` / `finish` / `final` / `reclaim` / `invalidate` 等登记成功后**自动**重跑生成器（加 `--no-dashboard` 才跳过，禁止为省时间跳过）；`validate_step.py --record` 也会顺带重建。不走登记的手工改动（如直接改 `RESULT.md`）改完手动跑一次 `verify_dashboard.py --dir <需求目录>`。
 - 🔴 **看板是辅助产物，不是门禁**：缺失或过旧只提示，不判 FAIL，不改变任何交付结论。
 - 证据**弹窗内联预览**：图片 / 视频直接看，`.md`（RESULT.md / REPLAY.md / case.md）与 `.json` / `.har` / `.log` / `.txt` / `.csv` 内联渲染成文本；Excel 等二进制回退「新标签打开 ↗」。`file://` 下浏览器禁止本地 fetch，文本预览不可用（会有提示），用 http 打开即可。
-- **证据终验**（11.6，独立维度、不重跑浏览器）：明细有「终验」列与筛选（未终验/终验中/终验通过/终验不通过），总览有「证据终验」卡片（终验通过/已完结），风险里「终验不通过」= 高风险、「已完结但未终验」= 低风险（会聚合成一条）。登记用 `verify_state.py final`。
+- **证据终验**（11.6，独立维度、不重跑浏览器）：明细有「终验」列与筛选（未终验/终验中/终验通过/终验不通过/豁免；`豁免` 仅限用户明确放行、Checklist 置 `[waived]` 时使用，`--note` 必写放行范围与用户原话），总览有「证据终验」卡片（终验通过/已完结），风险里「终验不通过」= 高风险、「已完结但未终验」= 低风险（会聚合成一条）。登记用 `verify_state.py final`。
 - 数据源（全部可选，缺失即降级）：`tests/.verify-state.json`、`.workflow-state.json`、`Step 3-Checklist.md`、`tests/AC-NN/`（case.md / REPLAY.md 或 script/ / evidence/ / RESULT.md）、`Step *-回归验证清单.md`。
 
 ## 二、项目上下文适配

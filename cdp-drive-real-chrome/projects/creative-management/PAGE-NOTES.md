@@ -1,10 +1,12 @@
 # creative-management 页面口径与坑（PAGE-NOTES）
 
-> 属于 cdp skill 的 **L1 页面级**：本项目 Creative Hub 页面在本地 dev 环境实测得到的**事实、口径与坑**。
-> 操作脚本见同目录 `README.md`；通用方法与坑清单见 `../../references/SCRIPTS.md`。
+> 属于 cdp skill 的 **L1 页面级**：本项目 Creative Hub 页面在本地 dev 环境实测得到的**事实、口径、测试账号与坑**。
+> 操作脚本怎么用见同目录 `README.md`；通用方法、L0 脚本表与坑清单见 `../../references/SCRIPTS.md`（唯一权威）。
 > **操作浏览器前与 README 一起读**。走不通先怀疑这里过期，当场改并刷新日期。
 >
 > 2026-10-10 由项目仓 `.agents/browser-verification.md` 迁入（用户要求不放 git 管理）。
+> 2026-10-13 整理：README 里的数据口径坑并入本文（与原「Ads 页列表 / KPI / 同环比」节合并去重）；两个账号节合并；内置浏览器面板专属内容单独成节；需求临时信息归入「需求临时备注」；
+> 🔴 本文件会随 skill 分发到多个 agent 目录 —— **不写客户账号邮箱 / 任何凭据**，账号只写 userId 与账号名（登录用的是账号字段，不是邮箱）。
 
 适用：在浏览器里跑 Creative Hub 页面做取证 / 取基线 / 复现问题（全栈工作流 Step 11.4、回归基线采集）。
 只记**本仓库 + 本地 dev 环境实测踩过的坑**，通用浏览器常识不写。
@@ -13,26 +15,19 @@
 
 | 项 | 值 |
 |---|---|
-| 入口 | `http://localhost:3001/crossretailer/CreativeManagement/{Dashboard\|Creative\|TagManagement\|Asset}` |
+| 入口 | `http://localhost:3001/crossretailer/CreativeManagement/{Dashboard\|Creative\|TagManagement\|Asset}`：Ads `/Creative`；Library `/Asset`；Tag `/TagManagement`；Dashboard `/Dashboard` |
 | 接口前缀 | `/creative-local/`（Vite 代理到后端，不是 `VITE_APP_CREATIVE_MANAGEMENT_URL` 的线上域名） |
-| 登录 | Agent 的内置浏览器与用户 Chrome **会话隔离**，没有登录态。必须由**用户本人**在浏览器面板里登录，禁止 agent 代输凭据 |
-| 未登录表现 | URL 被重写成 `http://localhost:3001`（路径丢失），页面停在加载动画，网络请求**全是 Vite 模块加载、零个后端 API** —— 看到这个形态就是没登录，别再等了 |
+| 登录 | 必须由**用户本人**登录，禁止 agent 代输凭据（CDP 用独立 `--user-data-dir` 实例，登一次持久化；内置浏览器面板见下文专节） |
+| 未登录表现 | URL 被重写成 `http://localhost:3001`（路径丢失），页面停在加载动画，网络请求**全是 Vite 模块加载、零个后端 API** —— 看到这个形态就是没登录，别再等了（CDP 下用 L0 `chk401.mjs --match creative-local` 判定） |
 
 ## CRITICAL：不要只看 DOM 判断「没数据」
 
 **实测翻车**：把日期设成某个月后，等了 18 秒，KPI 卡片全 0、列表显示 `No data found!`，据此判定该月无数据 —— **结论是错的**，接口还在路上，再等一会儿数据就出来了。
 
 规则：
-- 判定「有无数据」**必须看 XHR 响应体**，不能只看 DOM：`read_network_requests` 找到对应请求 → 带 `requestId` 再读一次拿 body
+- 判定「有无数据」**必须看 XHR 响应体**，不能只看 DOM（CDP 下用 `net-cap.mjs` / `xhr-rows-capture.js`；内置浏览器面板做法见专节）
 - 本地 dev + CK 大范围查询，**列表接口 20~40 秒才回是常态**，导出接口可到 40 秒以上
 - 请求列表里**没有状态码**（如只有 `POST …/getCollectionCreativeList`，后面没有 `→ 200 OK`）= 仍在 pending，继续等
-
-## 浏览器面板的宽度坑
-
-- 面板可视宽度约 **570px**，Creative Hub 页面按宽屏设计，**右侧工具栏（自定义列、导出图标）默认在可视区外**
-- 找不到某个按钮时先 `scroll` 方向 `right`，不要以为按钮不存在
-- `resize_window` 设 1280 / 1440 宽会被缩放塞进面板，**截图变得几乎不可读**；此时改用 `read_page` / `find` / `get_page_text` 定位，截图只用于最后留证
-- 定位元素优先 `find` 拿 `ref_N`，比坐标稳（页面横向滚动后坐标会失效）
 
 ## 日期范围控件
 
@@ -44,8 +39,9 @@
 
 ## Library 素材卡片
 
-- 点卡片的**图片区**打开的是图片预览灯箱，**不是**详情抽屉
+- 点卡片的**图片区**打开的是图片预览灯箱，**不是**详情抽屉；点非图区才开详情抽屉
 - Ad Performance tab 只对 `Distributed > 0` 的素材有意义；`Distributed 0` 的素材即使打开抽屉该 tab 也可能无数据，取证前先挑一个已分发的素材
+- Metrics 下拉要滚到底才能截到 Cost Per 块（详见下节）
 
 ## Ad Performance / Creative Analysis（CP-57189，2026-10-09）
 
@@ -79,35 +75,71 @@
 ## Ads 页列表 / KPI / 同环比的口径与坑（CP-57189 修复回路，2026-10-10）
 
 > 操作脚本在同目录 `README.md`（有配方）；这里只记本项目的事实与口径。
+> 2026-10-13 起 README「本页实测的坑」里的口径条目（原编号 6、8~14、12）并入本节，README 只留一行提醒。
 
-- **测试数据窗口**：client 62（`yinzixin`）的 TikTok 视频播放**只有 2026-05、06 有值**（10-09 被同步侧回刷，07 起全 0）。验视频指标一律用 06/01~06/30/2026，对比期用面板默认的上一周期（05/02~05/31）。06 vs 05 **全部上涨**，「下降」样本只能用 PDPV（GMV Max 行）
-- **6 月 vv=0 的 TikTok 行全是 GMV Max**（规格应为 NULL，同步侧写成了 0）→ 别拿它证明「真实为 0 显示 0」；Amazon SB-Video 有播放、Views at 25% 为 0，是干净样本
+- **测试数据窗口**：client 62（`yinzixin`）的 TikTok 视频播放**只有 2026-05、06 有值**（10-09 被同步侧回刷，07 起视频播放全 0）。验视频指标一律用 06/01~06/30/2026，对比期用面板默认的上一周期（05/02~05/31）。
+  06 vs 05 **全部上涨**，要「下降」样本：用 PDPV（GMV Max 行）、或换 07 vs 06、或用 `compare.mjs custom` 造「05 当期 vs 06 对比」（原 README 坑 10）
+- **6 月 vv=0 的 TikTok 行全是 GMV Max**（规格应为 NULL，同步侧写成了 0，属数据侧问题）→ 别拿它证明「真实为 0 显示 0」；Amazon SB-Video 有播放、Views at 25% 为 0，是干净样本（原 README 坑 11）
 - **列配置偏好存 localStorage**：`userid_<uid>_lastSearchColumn__CreativePage`（表格读）+ `__lastSearchColumn__CreativePage`（Detail 页读）；KPI 卡片 `creative_performance_panel_showList_<uid>`；Group by 记忆 `userid_<uid>_groupBy__CreativePage`（实际 key 被 Storage 包装加了 `retailer_` 前缀）。
   🔴 页面卸载时会把内存配置**写回**，「删 key → 刷新」模拟不了首次进入 → 用 skill 的 `fresh-entry.mjs`
-- **Custom Columns 弹框**：勾选态只来自 `v-model`；2026-10-10 起 `CreativeCustomColumn.vue#initialCheckedDataIndexes` 优先读已保存配置（之前重进后弹框回到默认集、再 Apply 会丢列）。抽屉 `PerfCustomColumn.vue` 仍是旧行为
-- **Ad Type 分组下 `adType` 列被隐藏**（类型名在 Dimension 列）；**Group by 汇总的单价类分子含不支持播放的行的花费**（例：Amazon SB-Video + Walmart SV 混组，CPV = 36,615.6 / 5）—— 口径待产品定
-- **开启对比后数值不吃「完整数字」开关**（`CompareChange` 存量行为）；对比期 null 的列下方是灰色 `--` 占位，不是变化率
-- **工具栏「缩写 / 完整数字」开关**：`isShowAbbreviateNumbers === true` 才是完整数字（命名反直觉）
+- **Custom Columns 弹框**：勾选态只来自 `v-model`；2026-10-10 前弹框按默认集初始化、与表格不一致（重进后弹框回到默认集、再 Apply 会丢列），已修（`CreativeCustomColumn.vue#initialCheckedDataIndexes` 优先读已保存配置）。抽屉 `PerfCustomColumn.vue` 仍是旧行为（原 README 坑 12）
+- **Ad Type 分组下 `adType` 列被隐藏**（类型名在 Dimension `name` 列里 —— 标注时框 `name`，原 README 坑 6）；**Group by 汇总的单价类分子含不支持播放的行的花费**（例：Amazon SB-Video + Walmart SV 混组，CPV = 36,615.6 / 5）—— 口径待产品定
+- **开启对比后数值不吃「完整数字」开关**（`CompareChange` 存量行为，数值仍缩写）→ 对账数值用模型或关掉对比读（原 README 坑 8）
+- **对比期为 null 的列**：数值 `--`，下方是 `CompareChange` 既有的灰色 `--` 占位（`<div v-else>--</div>`）—— 不是变化率，AC「不展示变化率」据此判定成立，RESULT 要写明（原 README 坑 9）
+- **工具栏「缩写 / 完整数字」开关**：`isShowAbbreviateNumbers === true` 才是完整数字（命名反直觉）；对账必须完整数字（缩写 471.2K 会误判 DIFF）
+- **表头排序只在「降序 ⇄ 升序」两态间切换，没有「取消排序」**：第 1 次点 = 降序（`data-sorttype=2`），第 2 次 = 升序（1），第 3 次又回到降序。要拍哪个方向先读 `data-sorttype`，别按点击次数猜（实测一次把升序图标成了降序）。用 `sort-check.mjs`，它会等**这一次**的响应再读并三方比对（原 README 坑 13）
+- **素材行 / Ad 行由 CK 排序：升序、降序 null 都在最后**；Ad Type 中间行由 Java `CreativeGroupByAggregator#buildAdTypeParentRows` 排序（`nullsFirst` + 整体 `reversed()` ⇒ 升序 null 在最前）——两层规则不一致，以实测为准（原 README 坑 14）
 
-## 🔴 默认测试账号与开测前查库（用户约定，2026-10-10）
+## 图片 Creative 生成页（Creative Generation / Image Generation，CP-58118，最后验证 2026-10-14）
 
-- **默认用 yinzixin（clientId 62，userId 93，内部超管）**，请用户登录前先查库确认该账号在目标窗口有每条 AC 需要的样本；缺的那几条再换 client，并一次性列出候选账号（客户账号须用户本次同意、只读）。
-- client 62 已知缺口（2026-10-10 CK 全年扫描）：Walmart sv 视频指标全为 null、无 Walmart display / sb 视频数据、无 Amazon SD/STV 视频、无 Instacart ⇒ 平台支持度差异类 AC（AC-40/41/42 一类）在 62 上做不了。
-- client 777（Acadia）：唯一超管 `ross@bobsledmarketing.com`（userId 2572，客户团队账号）；用独立实例 `--remote-debugging-port=9230 --user-data-dir=...\cdp-profile-c777`（登录态已持久化）。
-  2026-10-10 时 777 近 12 个月：Amazon SB-Video 5s 有值、SD-Video / SD-Image 5s 写成 0（应为 NULL）、Walmart SV 仅 1 行且全 null、无 Instacart 视频、Instacart Display Banner 2s 写成 0 —— 数据随同步回刷会变，开测前重扫（按 productLine | showAdType 统计 null / 0 / 正数）。
-- 找账号 SQL（Amazon SQL Server，只读，只取身份 / 权限列，禁读 pwd / pwd2 / salt / token / RandA）：
+> 操作脚本：同目录 `creativehub-*`（见 README「图片 Creative 生成页脚本」）。下面是事实与坑。
+
+- **页面上下文**：微前端，`window.$pinia._s` 是空的 → 用户 / client 信息读**组件里的 userStore**（从宿主组件 `setupState` / `appContext` 取），别读全局 pinia；宿主组件用 `creativehub-find.js`（按 `assist` + `generateDisabledTip` 找）或 `creativehub-lib.js` 的 `__g1.host()`
+- **同一 userId 换 client 页面上没有入口** → 需要别的 client 的样本就换账号（按 playbook §10 找账号），别找切换器
+- **已分析过的商品 2 秒内直接返回 PD / 卖点**（后端有缓存）→ 要拍「进度从 0 递增」的帧，**换一个没分析过的新商品**
+- **选品后 PD 有 14~17 秒的前置 0%**（爬取商品详情阶段），不是卡死；进度帧的「起点」按第一次 >0 算，别把这段当缺陷
+- **Ad Type 下拉是虚拟滚动**：打开后先把列表容器 `scrollTop=0` 再找，或直接用搜索框（`creativehub-drive.mjs` 的 `pickAdType` 走搜索）
+- **选 Selling Point = Custom 会清空 Prompt**（预期行为）→ 测「Prompt 回填 / 保留」类断言别在 Custom 之后读
+- **Style Type 按钮**文字是整词 `Lifestyle` / `Studio`；mock 卖点名形如「Mock hook N · Lifestyle」，**按 `/Lifestyle/` 子串匹配会误中卖点按钮** —— 一律整词匹配
+- **选品图片字段名是 `imgUrl`**（`selectedProduct.imgUrl`），不是 `image` / `imageUrl`
+
+- **Generate 按钮在 789px 窗口高度下在首屏以下**：找点击目标前先 `scrollIntoView`，否则「找不到目标」；Image Resize 三张结果卡一屏放不下 → 临时 `CDP_VIEWPORT=1600x1350@1`（dpr 见 SCRIPTS 坑 52）
+- **Ad Type 下拉对 `pickAdType` 重复调用会在开 / 关之间切换**：先判断是否已展开；搜索框先全选清空再输入；**Add Product 弹层还开着时下拉会被它挡住**，输入的关键字会跑进商品搜索框 → 先关弹层，并确认商品列表加载完再点商品
+- **Size Specification Asset 的尺寸下拉要点选项前的复选框**，点文字不生效；勾选后宿主的 specs 约 1 秒才同步，读断言前等一下
+- **只有 ADSP - Component-based - Responsive eCommerce 同时有 Custom Image 与 Size Specification Asset**（2026-10-14 查规格表）→ 测 Dimension Type 切换只能用它
+- **规格接口失败后，新 Ad Type 会先跑约 15 秒卖点生成**，这期间 Generate 置灰提示是「AI is analyzing, please wait.」（优先级更高），等 AI 结束再悬停取「加载失败」提示
+- **置灰提示第一次悬停有时截不到 tooltip**（页面状态已正确）：移开再悬停重拍一次，文件名加后缀区分
+- **crossretailer 页全局 `productline` 是 `retailer`**；Creative Generation 的 Ad Type 树里 SB 只挂在 Walmart 下 → 测「按平台反查 Ad Type」要用多个平台都有的值（如 `Image`）才有区分力
+- **Edit Creative 是 `.el-drawer` 不是 `.el-dialog`**；关它里面的 AI 候选弹层点 `.el-drawer__header`
+- **内存挂载（`creativehub-mount-demo.js`）的抽屉里，选品弹层和 Ad Type 下拉点不出来**（`display:block` 但截图看不到、坐标点不中）→ 选品走抽屉的 `init({ productId })`、Ad Type 走组件自己的 `onChange`，证据里标明；**Demo 宿主卡会盖住抽屉**，截抽屉前先隐藏它
+- **Creative 页结果区刷新不保留、Generation Log 不显示文案**：Edit Creative 保存后的内容到库里读回（`ai_generation_job.creative_edit_json` / `asset_name`，按 jobId 只读查询）；本地后端与 mysql MCP 是同一个 `creative_management` 库（2026-10-14 实测 job 5036 / 5494）
+
+### AI 请求体取证（后端日志只在 IDEA 控制台）
+
+- 本地后端在 IDEA 里跑，**日志只在 IDEA 控制台**，读不到 → 「发给 AI 的请求体」用两条路取证：
+  ① 前端网络记录（`creativehub-netcap.mjs`，请求体 + 响应体原文）；② `GET /creative-local/ai/generation-log/{jobId}`：`requestJson` 是字符串，**外层是数组，取 `[0]`**
+- **Generation Log 页面只列成功记录**，失败的 job 在页面上找不到 → 失败分支只能走 ② 按 jobId 查
+- ② 是脚本自己发的只读 GET：2026-10-13 起先在页面内无头直发（令牌不经过 Node），401/403 才复用内存里的页面请求头（不落盘不打印），产出 `authVia` 写明走的哪条路；RESULT 里写明这一点
+
+### 规格表：哪些 Ad Type 有 AI 文案字段
+
+- 找「某 Ad Type 会让 AI 生成 Headline / CTA 等文案字段」的正例，查规格表而不是在页面上逐个试：
+  `asset_requirement_spec` 中 `is_gen_ai_use = 1 AND is_ai_generate LIKE 'Yes%'`（只读，按 Ad Type 分组看字段）
+- 写 AC 时就用它做「Given 可达性」查证（workflow step-03）：查不到同时满足 Then 要求的 Ad Type → 当场问用户改口径，别留到验收（教训来源见「需求临时备注」CP-58118 AC-24/74）
+
+## 🔴 默认测试账号、入口与开测前查库（用户约定，2026-10-10；2026-10-13 合并两节）
+
+- **默认用 yinzixin（clientId 62，userId 93，内部超管）**：主流程默认账号。请用户登录前先查库确认该账号在目标窗口有每条 AC 需要的样本；缺的那几条再换 client，并一次性列出候选账号（客户账号须用户本次同意、只读）。
+  当期窗口常无平台差异类样本，会把用例卡成「阻塞」而非失败 —— 先换样本再判缺陷；视频数据窗口见上文「Ads 页列表 / KPI / 同环比」，已知缺口见「需求临时备注」
+- **client 777**（Acadia / Niche Agency，`serviceStatus='test'`，四平台齐全）：平台支持度差异类 AC 的样本库。
+  可用账号：**userId 2572**（SuperAdmin，唯一超管，**客户团队账号**；账号名开测前按 userId 查库取，不在本文件记邮箱）——
+  🔴 按 playbook §10 须用户**本次**明确同意才可用，且只读；不写进测试交接文档。
+  用独立实例 `--remote-debugging-port=9230 --user-data-dir=...\cdp-profile-c777`（登录态已持久化）。
+  client 777 下含 pacvue / test 字样的内部账号全部 archived + 已删除。
+- **查账号真源**：Amazon SQL Server `amazong_pacvue_test.dbo.User`（`User.clientId` 直接绑客户）；只读，只取身份 / 权限列，禁读 `pwd / pwd2 / salt / token / RandA`：
   `SELECT userId,name,mail,status,isDeleted,isSuperAdmin,userRole,accesiblePlatform FROM amazong_pacvue_test.dbo.[User] WHERE clientId=<id> AND ISNULL(isDeleted,0)=0 ORDER BY isSuperAdmin DESC, lastLoginTime DESC`
-- client 777 下含 pacvue / test 字样的内部账号全部 archived + 已删除。
+  （`mail` 列只用于当场核对，不写进笔记 / 证据 / 交接文档；报给用户用账号名 + userId，同一邮箱可对应多个账号）
 - **测完不恢复浏览器现场**（用户约定）。
-
-## 入口与测试账号（由 docs/browser-notes/creative-management.md 并入，最后验证 2026-10-09）
-
-- 入口：Ads `/crossretailer/CreativeManagement/Creative`；Library `/crossretailer/CreativeManagement/Asset`；Tag `/crossretailer/CreativeManagement/TagManagement`；Dashboard `/crossretailer/CreativeManagement/Dashboard`
-- **client 62**（`yinzixin`，内部超管，userId 93）：主流程默认账号；视频数据窗口见上文「Ads 页列表 / KPI / 同环比」。当期窗口常无平台差异类样本，会把用例卡成「阻塞」而非失败 —— 先换样本再判缺陷
-- **client 777**（Acadia / Niche Agency，`serviceStatus='test'`，四平台齐全）：平台支持度差异类 AC 的样本库；
-  可用账号 `ross@bobsledmarketing.com`（userId 2572，SuperAdmin）属**客户团队账号** —— 🔴 按 playbook §10 须用户**本次**明确同意才可用，且只读；不写进测试交接文档
-- 查账号真源：Amazon SQL Server `amazong_pacvue_test.dbo.User`（`User.clientId` 直接绑客户）；只取身份与权限列，禁读凭据列
-- Library 点卡片**图片区** = 灯箱，点非图区才开详情抽屉；Metrics 下拉要滚到底才能截到 Cost Per 块
 
 ## 🔴 指标列显示 `--` 的三层原因（本项目专属判据）
 
@@ -146,7 +178,7 @@ Ads 表的 `--` 有三个来源，**处理方式完全不同**：
 | Tag 页 | `POST tag/download` | 同步 blob |
 | 素材抽屉 Ad Performance | `POST performance/downloadAssetCreativeList` | 同步 blob |
 
-- 文件落到 `C:\Users\<user>\Downloads`
+- 浏览器默认下载位置是 `C:\Users\<user>\Downloads`；CDP 验证一律 `export-target.mjs --dir <scratchpad 新建空目录>`，不进 Downloads
 - **有时落成 `{uuid}.tmp` 不自动改名**。先 `zipfile.is_zipfile()` 校验是合法 xlsx 再归档，别当失败
 - 导出文件名带的是**导出当天日期**（如 `Ad_Image_2026-09-24.xlsx`），**不是数据窗口日期** —— 归档时必须改成含数据窗口的名字，否则变更前后两份分不清
 - **真实客户数据的导出**（用户要求验完删文件）：删前必须先落「可复算」的产物，否则验收无法复核（CP-58252 AC-17 因此缺证返工一次）：
@@ -165,21 +197,37 @@ Ads 表的 `--` 有三个来源，**处理方式完全不同**：
 
 ## 工具链（别重写已存在的东西）
 
-| 要做什么 | 用什么 | 在哪 |
-|---|---|---|
-| 执行 JS / 真点击 / 截图 / 下载 | `cdp.mjs` | skill `cdp-drive-real-chrome/scripts` |
-| 读表格数据（固定列安全） | `vtable-read.js` | 同上 |
-| 布景 + 截图 + 导出单元格几何 | `stage-shot.mjs --rects` | 同上 |
-| 读 `NULL` vs `0` 三态、按类型分组 | `vue-datalayer-read.js` | 同上 |
-| 证据标注图（框边写字，推荐；吃页面导出的 rects） | `annotate-rects.py` | skill `cdp-drive-real-chrome/scripts` |
-| 并行开窗 / 按 targetId 锁标签 | `tab-open.mjs` / `conn.mjs`（`CDP_TARGET`） | 同上 |
-| Ads 页布景、行定位展开、单元格取证、分组对账 | 见 `projects/creative-management/README.md` | skill `cdp-drive-real-chrome/projects/creative-management` |
-| 单图裁剪标注（框边写字版） | `annotate.py` | skill `cdp-drive-real-chrome/scripts` |
-| 多面板合成标注图 | `compose.py` | skill `cdp-drive-real-chrome/scripts` |
+🔴 **脚本表只在 [`../../references/SCRIPTS.md`](../../references/SCRIPTS.md) 维护**（L0：cdp / conn / sconn / real-click / vtable-* / vue-datalayer-read / stage-shot / annotate.py --rects / compose / tab-open …）；
+本项目 L1 脚本（Ads 页布景、行定位展开、单元格取证、分组对账、`creativehub-*`）见同目录 [`README.md`](README.md)。
+（2026-10-13 前这里有一份工具链对照表，与 SCRIPTS.md 重复且已过时 —— 推荐的 `annotate-rects.py` 已并入 `annotate.py --rects`。）
 
 🔴 **通用方法论只写在 `../../references/SCRIPTS.md`，本文件只留本项目特有的口径与坑** —— 两边都写会漂移。
 
+## 内置浏览器面板（非 CDP）专属
+
+> Agent 客户端自带的浏览器面板（`read_page` / `find` / `resize_window` 等工具），不是本 skill 的 CDP 实例。以下只在用它时适用。2026-10-13 从各节归拢到这里。
+
+- **登录**：内置浏览器与用户 Chrome **会话隔离**，没有登录态。必须由**用户本人**在浏览器面板里登录，禁止 agent 代输凭据
+- **判「有无数据」**：`read_network_requests` 找到对应请求 → 带 `requestId` 再读一次拿 body（规则同上文 CRITICAL 节）
+- **面板宽度坑**：
+  - 面板可视宽度约 **570px**，Creative Hub 页面按宽屏设计，**右侧工具栏（自定义列、导出图标）默认在可视区外**
+  - 找不到某个按钮时先 `scroll` 方向 `right`，不要以为按钮不存在
+  - `resize_window` 设 1280 / 1440 宽会被缩放塞进面板，**截图变得几乎不可读**；此时改用 `read_page` / `find` / `get_page_text` 定位，截图只用于最后留证
+  - 定位元素优先 `find` 拿 `ref_N`，比坐标稳（页面横向滚动后坐标会失效）
+- **日期输入**：往 `Start Date ~ End Date` 输入框 `type` 再点 Apply **不生效**（用左右箭头步进，见「日期范围控件」）
+- **收尾**：改过 `resize_window` 的，用完 `preset: "desktop"` 还原
+
 ## 收尾
 
-- 改过 `resize_window` 的，用完 `preset: "desktop"` 还原
 - 验证期间临时写的调试代码 / 临时路由 / `console.log` 一律删除，提交前**逐仓** `git status`（前端是宿主仓 + `packages/creativehub` 嵌套仓两个）
+- 内置浏览器面板的收尾见上节
+
+## 需求临时备注（可过期，用前核对日期）
+
+> 只对某次需求 / 某个时间点成立的信息集中在这里，**不删**（复盘与下次同类需求有用），但用之前先核对是否仍成立。
+
+- **2026-10-10 · client 62 已知缺口（CK 全年扫描）**：Walmart sv 视频指标全为 null、无 Walmart display / sb 视频数据、无 Amazon SD/STV 视频、无 Instacart ⇒ 平台支持度差异类 AC（AC-40/41/42 一类）在 62 上做不了
+- **2026-10-10 · client 777 数据快照（近 12 个月）**：Amazon SB-Video 5s 有值、SD-Video / SD-Image 5s 写成 0（应为 NULL）、Walmart SV 仅 1 行且全 null、无 Instacart 视频、Instacart Display Banner 2s 写成 0 —— 数据随同步回刷会变，开测前重扫（按 productLine | showAdType 统计 null / 0 / 正数）
+- **2026-10-10 · CP-57189 第 1 轮修复回路命名**：`custom-columns-set.mjs` / `compare.mjs on` 产出文件默认前缀 `fix-r1-` 来自这一轮（`fix-r1-cc-log.json`、`fix-r1-01-compare-panel.png`）；别的需求用 `--prefix` 改
+- **2026-10-13 · CP-58118 AC-24/74**：「Given 可达性」没在写 AC 时查规格表，来回 3 轮才定口径 → 已沉淀为上文「规格表」节的规则
+- **2026-10-13 · CP-58118 出图 mock**：后端 `generate-creative-image` / AI 三能力当时写死 mock（图片内容不作证据），**上线前必删**；`creativehub-fields-compare.mjs` 的 `-04` 摘要默认 `evidenceType` 写的就是这个，mock 删除后设 `EVIDENCE_TYPE`
