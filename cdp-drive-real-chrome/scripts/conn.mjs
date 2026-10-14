@@ -4,9 +4,12 @@
 //   const c = await connect();                 // 目标解析：--target 实参 > CDP_TARGET > --match / CDP_MATCH（默认 localhost）
 //   const v = await c.ev(`document.title`);   // Runtime.evaluate（awaitPromise + returnByValue），默认 ≤30s
 //   await c.click({x, y});                    // 真鼠标点击（CSS 像素）
-//   await c.shot("a.png");                    // bringToFront → 截图(≤30s) → 重试 1 次 → screencast 兜底
+//   await c.shot("a.png");                    // 直接截图 ×2（不抢前台）→ 最小化则临时恢复再缩回 → bringToFront → screencast 兜底（坑 50）
 //   const r = await c.waitStable(EXPR);       // 表达式结果连续两次逐字节一致才返回（toast / 滑入动画先停稳再截）
 //   const f = await c.snapSame(EXPR, "x.png");// 截图前后各导一次 rects，不一致自动重拍；两份 rects 落盘
+//   const w = await c.waitFor(EXPR, { total: 40000 });            // 等某条件成立（自适应退避，超时抛错带 value/polls/elapsed）
+//   const [a, b] = await c.evAll(["expr1", "expr2"]);             // 一次往返读多个表达式（省往返、少中间态）
+//   const s = await c.settle({ idleMs: 500, quietMs: 400 });      // 等网络静默 + DOM 静默（取代 sleep 猜时长 / 遮罩误判）
 //   const off = c.on(msg => ...);  off();     // 订阅 / 取消订阅 CDP 事件（Network.* 等）
 //   c.close();
 //
@@ -30,12 +33,45 @@
 // 显式传入的超时（c.ev(expr, 180000) / c.send(m, p, 90000)）照常生效 —— 页面内本来就要长等的脚本自己给；
 // 想强制所有调用 ≤ CDP_SEND_TIMEOUT（子 agent 防看门狗），用 connect({ hardCap: true })，或直接 import sconn.mjs（= 这个开关的别名）。
 import fs from "node:fs";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
 
 export const PORT = Number(process.env.CDP_PORT || 9222);
 export const DEFAULT_MATCH = "localhost";
 // 最小化窗口截图前恢复成什么状态：默认 maximized（启动命令带 --start-maximized），可用 CDP_RESTORE_STATE=normal 覆盖
 export const RESTORE_STATE = process.env.CDP_RESTORE_STATE || "maximized";
 export const SEND_TIMEOUT = Number(process.env.CDP_SEND_TIMEOUT || 30000);
+
+// 找一个可用的 Python（annotate.py / compose.py 等画图脚本要用）。顺序（2026-10-14 实测调整）：
+//   显式传入 > DSH_PYTHON > **dsh 运行时自带** > LOCALAPPDATA 下的 Python3xx > PATH 上的 py / python。
+//   🔴 运行时必须排在用户安装之前：实测 `Programs\Python\Python314\python.exe` 存在但**导入 PIL 会挂**
+//   （Pillow 装在 dsh 运行时里），先命中它会让标注脚本静默失败。
+// 返回可执行路径；找不到返回 null（调用方自己决定报错文案）。
+export function findPython(explicit = "") {
+  if (explicit) return explicit;
+  const cands = [];
+  if (process.env.DSH_PYTHON) cands.push(process.env.DSH_PYTHON);
+  const la = process.env.LOCALAPPDATA || "";
+  if (la) {
+    cands.push(path.join(la, ".dsh", "dsh-runtimes", "dsh-primary-runtime", "dependencies", "python", "python.exe"));
+    try {
+      const pyRoot = path.join(la, "Programs", "Python");
+      for (const d of fs.readdirSync(pyRoot)) cands.push(path.join(pyRoot, d, "python.exe"));
+    } catch {}
+  }
+  for (const c of cands) {
+    try {
+      if (!c || !fs.existsSync(c)) continue;
+      // 光存在不够：必须真的能 import PIL，否则标注脚本会在最后一步才失败
+      const r = spawnSync(c, ["-c", "import PIL"], { stdio: "ignore" });
+      if (r.status === 0) return c;
+    } catch {}
+  }
+  for (const c of ["py", "python"]) {
+    try { const r = spawnSync(c, ["-c", "import PIL"], { stdio: "ignore" }); if (r.status === 0) return c; } catch {}
+  }
+  return null;
+}
 
 // 从命令行取 --port/--target/--match/--index（只返回实际给了的项），供保留旧 CLI 参数的脚本用
 export function cliTargetOpts(argv = process.argv) {
@@ -162,6 +198,89 @@ export async function connect(opts = {}) {
     return { stable: false, value: v, polls: tries };
   };
 
+  // ---- 2026-10-14 新增：等待 / 批量求值 / 事件驱动稳定等待（取代散落的 `c.ev` + `c.sleep(1000)` 轮询）----
+
+  // 默认成功判据：true 即成功；空数组 / 空对象也算「还没好」（列表还没回来时最常见的形态）。
+  // 需要「值一变就成功」用 until；需要自定义标准用 expect 覆盖（两者可同时给，都满足才成功）。
+  const defaultExpect = (v) => {
+    if (!v) return false;
+    if (Array.isArray(v)) return v.length > 0;
+    if (typeof v === "object") return Object.keys(v).length > 0;
+    return true;
+  };
+
+  // 自适应退避：总预算 total 内，前 fast 段用 min 粒度（抓瞬时态，如 toast、100% 停留帧），之后放慢到 max，减少无谓往返。
+  // 成功判据优先级：until（给了就只认它，适合「等值变成 X / 等它变化」）> expect（自定义）> 默认（truthy，空数组/空对象算没到）。
+  // 返回 {ok,value,polls,elapsed}；超时抛错（错上带 value/polls/elapsed/timeout=true，便于判「是没数据还是没等到」）。
+  const waitFor = async (expr, opts = {}) => {
+    const {
+      total = 60000, min = 25, max = 250, fast = 1500, until = null, expect = null,
+      initialDelay = 0, timeoutMs = 0, label = "", onPoll = null,
+    } = opts;
+    const isOk = until ? (v) => until(v) : expect || defaultExpect;
+    const t0 = Date.now();
+    if (initialDelay > 0) await sleep(initialDelay);
+    let polls = 0, value;
+    for (;;) {
+      value = await ev(expr, timeoutMs || undefined);
+      polls++;
+      if (onPoll) { try { onPoll(value, polls); } catch {} }
+      if (isOk(value)) return { ok: true, value, polls, elapsed: Date.now() - t0 };
+      const el = Date.now() - t0;
+      // 预算耗尽 —— 注意：即使「一次都没成功」，也必须走超时分支，不能因为 el>=total 就当成成功返回
+      if (el >= total) break;
+      await sleep(el < fast ? min : Math.min(max, Math.max(min, Math.round((max * el) / total))));
+    }
+    const e = new Error(`waitFor 超时（${total}ms / ${polls} 次轮询）${label ? " @ " + label : ""}: ` + String(JSON.stringify(value)).slice(0, 300));
+    e.value = value; e.polls = polls; e.elapsed = Date.now() - t0; e.timeout = true;
+    throw e;
+  };
+
+  // 批量求值：一次往返读多个表达式（读 5 个指标从 5 次往返变 1 次）。exprs: string[] → 同序数组；单项抛错为 null。
+  const evAll = async (exprs = [], to = SEND_TIMEOUT) => {
+    if (!Array.isArray(exprs) || !exprs.length) return [];
+    const r = await send("Runtime.evaluate", {
+      expression: `(() => { const E = ${JSON.stringify(exprs)}; return JSON.stringify(E.map((x) => { try { return { v: eval(x) }; } catch (e) { return { e: String((e && e.message) || e) }; } })); })()`,
+      returnByValue: true, awaitPromise: false, userGesture: true,
+    }, to);
+    if (r.exceptionDetails) throw new Error("PAGE EXCEPTION: " + JSON.stringify(r.exceptionDetails).slice(0, 400));
+    return JSON.parse(r.result.value).map((x) => (x.e !== undefined || x.v === undefined ? null : x.v));
+  };
+
+  // settle：等到「这一轮操作」真的结束 —— 先等网络静默（pending 归零后再连续 idleMs 无新请求），再在页面里等 DOM 静默（连续 quietMs 无 mutation）。
+  // 取代 `await sleep(列表要 20~40s 就设 40s)`，以及 wait-idle 的「遮罩没了但旧列表还在」误判（后者只等遮罩、不等数据）。
+  // 分工：settle 管「请求停没停 + DOM 稳没稳」；遮罩 / Total 与响应一致仍归 wait-idle / 页面脚本（PAGE-NOTES 的 16a 判据）。
+  // 返回 {settled, elapsed, pending, dom} —— 超时返回 settled:false（不抛错），调用方自己决定是否继续。
+  const settle = async ({ idleMs = 500, quietMs = 400, max = 45000, minWaitMs = 0, urlRe = null } = {}) => {
+    const pending = new Set();
+    let lastNet = Date.now();
+    const off = on((m) => {
+      if (m.method === "Network.requestWillBeSent") {
+        if (!urlRe || urlRe.test(m.params.request.url)) { pending.add(m.params.requestId); lastNet = Date.now(); }
+      } else if (m.method === "Network.loadingFinished" || m.method === "Network.loadingFailed") {
+        if (pending.delete(m.params.requestId)) lastNet = Date.now();
+      }
+    });
+    const t0 = Date.now();
+    try {
+      await send("Network.enable", { maxPostDataSize: 2000 }).catch(() => {});
+      for (;;) {
+        await sleep(60);
+        const now = Date.now(), el = now - t0;
+        if (el < minWaitMs) continue;
+        if (pending.size > 0 || now - lastNet < idleMs) {
+          if (el >= max) return { settled: false, reason: "net-timeout", pending: pending.size, elapsed: el };
+          continue;
+        }
+        const quiet = await ev(
+          `new Promise((res) => { let n = 0; const ob = new MutationObserver(() => { n++; }); try { ob.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true }); } catch (e) { return res({ quiet: true, noBody: true }); } const t0 = Date.now(); const tick = () => { const el = Date.now() - t0; if (n === 0 && el >= ${quietMs}) { ob.disconnect(); return res({ quiet: true, mutations: n, elapsed: el }); } if (el >= ${Math.min(max, 12000)}) { ob.disconnect(); return res({ quiet: false, mutations: n, elapsed: el }); } setTimeout(tick, 50); }; tick(); })`
+        ).catch(() => ({ quiet: true, pageError: true }));
+        if (quiet && quiet.quiet) return { settled: true, elapsed: Date.now() - t0, pending: 0, dom: quiet };
+        if (Date.now() - t0 >= max) return { settled: false, reason: "dom-timeout", dom: quiet, elapsed: Date.now() - t0 };
+      }
+    } finally { off(); }
+  };
+
   // 同帧截图：先等稳定，再「rects → 截图 → rects」，不一致重拍（最多 retries 次）；两份 rects 落盘供验收核对（坑 15 / 16e）
   const snapSame = async (rectsExpr, file, { retries = 4, ready } = {}) => {
     await waitStable(rectsExpr, ready ? { ready } : {});
@@ -179,5 +298,5 @@ export async function connect(opts = {}) {
     return { same, before, after };
   };
 
-  return { page, ws, send, ev, on, off, sleep, click, key, shot, winState, waitStable, snapSame, close: () => { try { ws.close(); } catch {} } };
+  return { page, ws, send, ev, on, off, sleep, click, key, shot, winState, waitStable, snapSame, waitFor, evAll, settle, close: () => { try { ws.close(); } catch {} } };
 }

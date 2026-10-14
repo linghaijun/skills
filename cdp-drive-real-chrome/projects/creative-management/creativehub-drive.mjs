@@ -124,7 +124,9 @@ export async function open() {
 // 常用元素表达式
 const lbl = (t) => `[...document.querySelectorAll('div')].find(e => e.childElementCount === 0 && e.innerText.trim() === '${t}')`;
 export const R = {
-  adType: `(${lbl("Ad Type")} || document.body).parentElement`,
+  // 「Ad Type」标签带必填星号（子元素），lbl 的整词 + 无子元素匹配不中，会落到 document.body（2026-10-14 实测）
+  // → 取去掉星号后等于标签文字的最深一层 div，找不到返回 null，不再回落 body
+  adType: `([...document.querySelectorAll('div')].filter(e => e.innerText && e.innerText.replace(/[*]/g, '').trim() === 'Ad Type').pop() || null)?.parentElement`,
   adTypeSel: `[...document.querySelectorAll('.el-select, .el-tree-select, [class*=select]')].find(e => /Amazon|Walmart|Others|Instacart|Criteo|Target|ADSP|Tiktok/.test(e.innerText) && e.getBoundingClientRect().top > 200 && e.getBoundingClientRect().height < 60)`,
   styleType: `${lbl("Style Type")}.parentElement`,
   spBlock: `document.querySelector('.selling-point-grid')?.parentElement`,

@@ -7,10 +7,10 @@
 变成可执行断言。
 
 用法:
-    python validate_step.py --dir docs/develop/xxx --step 3
-    python validate_step.py --dir docs/develop/xxx --all
-    python validate_step.py --dir docs/develop/xxx --step 3 --record   # 写入状态
-    python validate_step.py --dir docs/develop/xxx --status            # 看进度/续跑点
+    py validate_step.py --dir docs/develop/xxx --step 3
+    py validate_step.py --dir docs/develop/xxx --all
+    py validate_step.py --dir docs/develop/xxx --step 3 --record   # 写入状态
+    py validate_step.py --dir docs/develop/xxx --status            # 看进度/续跑点
 
 退出码:
     0 = 通过
@@ -31,6 +31,10 @@ import re
 import sys
 import subprocess
 from pathlib import Path
+
+# 跑一次验收会在 skill 自己的 scripts/ 下留 __pycache__（本脚本 import qa_record / verify_state）。
+# skill 目录是要分发的，多出这些 .pyc 只会让「skill 里多了文件」变成噪音。
+sys.dont_write_bytecode = True
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 try:  # Step1 问答记录解析（同目录共用脚本）
@@ -122,7 +126,7 @@ FULLSTACK = {
     11: ("自检报告", ["Step 11-*自检*.md"]),
     12: ("AI Review", ["Step 12-*.md"]),
     13: ("全局一致性", ["Step 13-*.md"]),
-    14: ("AC-Subtask提测", ["Step 14-*Subtask*.md", "Step 14-*映射*.md", "Step 14-*.md"]),
+    14: ("AC-Subtask提测", ["Step 14-*Subtask*.md", "Step 14-*映射*.md"]),
 }
 BACKEND = {
     1: ("需求澄清 Q&A", ["Step 1-*.md"]),
@@ -137,7 +141,7 @@ BACKEND = {
     10: ("自检报告", ["Step 10-*自检*.md"]),
     11: ("AI Review", ["Step 11-*.md"]),
     12: ("全局一致性", ["Step 12-*.md"]),
-    13: ("AC-Subtask提测", ["Step 13-*Subtask*.md", "Step 13-*映射*.md", "Step 13-*.md"]),
+    13: ("AC-Subtask提测", ["Step 13-*Subtask*.md", "Step 13-*映射*.md"]),
 }
 # 回归清单与测试矩阵同步骤
 REGRESSION_GLOB = {"fullstack": "Step 8-回归验证清单.md", "backend": "Step 7-回归验证清单.md"}
@@ -191,6 +195,40 @@ def read(p: Path) -> str:
 
 
 # ------------------------------------------------------------ 各步检查
+
+# ------------------------------------------------------------ 变更类型分流（Step1 §0）
+
+# 分流声明写在 Spec / 问答记录**文首**（step-01 §0 要求的「逐条写明跳过 X，理由」）：
+#   - 变更类型：C（Bugfix / 微调）
+#   - 跳过 Step5：确无表改动
+SKIP_DECL_RE = re.compile(r"跳过\s*(?:Step\s*|第\s*)?(\d{1,2})(?:\s*步)?")
+PATH_DECL_RE = re.compile(r"变更类型[：:]\s*\**\s*([ABC])")
+
+
+def declared_skips(d: Path, spec: dict, wf: str) -> tuple[str, set[int], set[int]]:
+    """读文首分流声明 → (变更类型, 允许跳过的步, 声明了但不允许跳的步)。
+
+    为什么需要这一步：step-01 §0 允许 B/C 路径跳过若干步，但交付门禁的
+    `check_earlier_steps` 会**无条件重跑前序每一步**，缺产出物直接 FAIL ——
+    声明过的跳过没人认，B/C 路径永远过不了交付门禁（2026-10-14 实测：C 路径报
+    Step2/4/5/6/7 等「产出物 未找到」，B 路径报 Step5/7）。
+    这里只认**显式声明**的跳过；没写声明 = 按全 14 步核对（判不准按高一档走）。
+    Step3 与交付门禁步（全栈 13/14、后端 12/13）是流程骨架，**任何分流都不许跳过**。
+    """
+    heads = []
+    for step in (2, 1):                       # Spec 优先；C 路径没有 Step2，声明落在问答记录
+        f = find_one(d, spec[step][1]) if step in spec else None
+        if f:
+            heads.append("\n".join(read(f).splitlines()[:60]))
+    text = "\n".join(heads)
+    m = PATH_DECL_RE.search(text)
+    kind = m.group(1) if m else ""
+    named = {int(n) for n in SKIP_DECL_RE.findall(text)}
+    protected = {3, FINAL_STEP[wf], HANDOVER_STEP[wf]}
+    skipped = {s for s in named if s in spec and s not in protected}
+    refused = {s for s in named if s in protected}
+    return kind, skipped, refused
+
 
 def check_exists(d: Path, step: int, spec: dict) -> Path | None:
     title, pats = spec[step]
@@ -525,6 +563,33 @@ def check_pm_pending(d: Path, step: int) -> None:
         add(WARN, "待PM确认", f"{len(ids)} 条：{ids[:10]} —— 清单已贴给用户？Step3 前须清零")
 
 
+def check_checklist_jira_txt(d: Path, spec: dict) -> None:
+    """Step3 的《Jira 可拷贝纯净版》是**强制同时产出**的第二个产出物，但此前没有任何断言 ——
+    「强制」只写在文档里，缺了没人知道（文档说机器验收与人工 Review 同等效力，这里就是缺口）。
+    `checklist_jira.py --dir <需求目录>` 一条命令就能生成，所以缺了判 FAIL。"""
+    if find_one(d, spec[3][1]) is None:
+        return
+    hits = sorted(d.glob("Step 3-Checklist-Jira*.txt"))
+    if hits:
+        add(OK, "Step3 Jira 纯净版", hits[0].name + (f"（另有 {len(hits) - 1} 份）" if len(hits) > 1 else ""))
+    else:
+        add(FAIL, "Step3 Jira 纯净版",
+            "未找到 Step 3-Checklist-Jira*.txt（强制产出物）—— 跑 `scripts/checklist_jira.py --dir <需求目录>` 生成")
+
+
+def check_ddl_rollback(d: Path, spec: dict) -> None:
+    """`Step 5-ddl-rollback.sql` 是强制配套（每条 DDL 的逆操作），此前只被 `Step 5-*.sql`
+    通配覆盖：只要有一个 sql 就算过，rollback 缺了没人知道。"""
+    if not sorted(d.glob("Step 5-ddl.sql")):
+        return
+    hits = sorted(d.glob("Step 5-*rollback*.sql"))
+    if hits:
+        add(OK, "Step5 回滚脚本", hits[0].name)
+    else:
+        add(FAIL, "Step5 回滚脚本",
+            "有 Step 5-ddl.sql 但没有 ddl-rollback.sql（强制配套：每条 DDL 都要写逆操作）")
+
+
 def check_qa_changes(d: Path) -> None:
     """看板上改过问答、但 AI 还没跟用户确认并同步下游 —— 任何一步都不放行。
 
@@ -707,22 +772,31 @@ def matched_keys(mapping: list) -> bool:
 
 
 def check_final_gate(d: Path, acs: list[int], rs: list[int], wf: str, spec: dict) -> None:
-    """交付门禁：不得有 [open] 的 AC、R-NN 必须有结论、脏数据必须已清理。"""
+    """交付门禁：不得有 [open]/[blocked] 的 AC、R-NN 必须有结论、脏数据必须已清理。"""
     f = find_one(d, spec[3][1])
     if f:
         # 🔴 [open] 既可能在 AC 编号之后，也可能在之前（`* [open] AC-26 ...`）。
         # 早期正则只认前者，对后一种格式**恒绿** —— CP-57337 实测 51 条全是 [open]
-        # 却仍报「无 [open]」。改为逐行判定：同一行里既有 [open] 又有 AC-NN 即算未回写。
-        opens = [m.group(1) for line in read(f).splitlines() if "[open]" in line
+        # 却仍报「无 [open]」。改为逐行判定：同一行里既有标记又有 AC-NN 即算未回写。
+        # 🔴 `[blocked]` 同等门禁：verify_state 收尾时会打印「Checklist 应回写 [blocked]」，
+        # 而早期门禁只拦 [open]，于是「[blocked] 既不用放行、也不留风险接受记录」——
+        # 一键绕过交付门禁。确实要放行只有一条路：`[waived]` + 证据验收报告里的风险接受记录。
+        not_done = ("[open]", "[blocked]")
+        opens = [m.group(1) for line in read(f).splitlines()
+                 if any(k in line for k in not_done)
                  for m in [re.search(r"AC-(\d{1,3})\b", line)] if m]
         if opens:
             add(FAIL, "交付门禁 AC 状态",
-                f"仍为 [open]: {[ac_token(int(n)) for n in opens[:10]]}（Step11 应回写 [done]）")
+                f"仍为 [open]/[blocked]: {[ac_token(int(n)) for n in opens[:10]]}"
+                f"（通过的回写 [done]；确实阻塞且用户放行的走 [waived] + 风险接受记录）")
         else:
-            add(OK, "交付门禁 AC 状态", "无 [open]")
+            add(OK, "交付门禁 AC 状态", "无 [open]/[blocked]")
         # [waived] = 证据验收没通过、由用户放行（与 [done] 分开计数）；必须在证据验收报告里有
-        # 「风险接受记录」且同一行点名该 AC，否则「写个 [waived]」就能绕过交付门禁
-        waived = sorted({int(m.group(1)) for m in re.finditer(r"\[waived\]\s*AC-(\d{1,3})\b", read(f))})
+        # 「风险接受记录」且同一行点名该 AC，否则「写个 [waived]」就能绕过交付门禁。
+        # 与上面的 [open] 一样**逐行判定**：标记在编号前/后都认（早期只认前者，
+        # `* AC-26 … [waived]` 这种写法既不触发豁免记录 FAIL、也不 WARN，等于免检放行）。
+        waived = sorted({int(m.group(1)) for line in read(f).splitlines() if "[waived]" in line
+                         for m in [re.search(r"AC-(\d{1,3})\b", line)] if m})
         if waived:
             ea = d / EVIDENCE_ACCEPT_GLOB[wf]
             ea_text = read(ea) if ea.exists() else ""
@@ -824,15 +898,28 @@ _REGRESSION_GROUP_RE = re.compile(r"^#{2,3}\s*\d*\.?\s*回归任务")
 # Step10 漏登记、复验报告放在 tests/_acceptance/ 门禁读不到、回归汇总停在旧数字、交接文档停在「前端未开发」。
 # 下面几项把「另一处也要改」从记忆变成断言。
 
+# 结论解析**只有一个入口**：verify_state 的 `_verdict_text` + `classify_verdict`
+# （表格行 `| 结论 | ✅ **PASS** |` / 顶层 `- 结论：` / 裸 emoji 行 / 兜底，一套规则）。
+# 这里曾自带一条只认顶格 `- 结论：` 的正则，导致真实 RESULT.md 里
+# `| 结论 | ❌ **FAIL** |` 这种写法解析为空，而 check_state_vs_result 遇到空值就跳过比对 →
+# 2026-10-14 实测 250 份 RESULT.md 有 140 份（56%）让「用例状态 vs RESULT」门禁静默失效。
+# 两套解析器 = 漂移的来源，不再复制第二份。
+try:
+    from verify_state import _verdict_text as _vs_verdict_text, classify_verdict as _vs_classify
+except Exception:                                          # noqa: BLE001 - 单文件分发时退回本地正则
+    _vs_verdict_text = _vs_classify = None
+
 _RESULT_VERDICT_RE = re.compile(r"^- 结论[：:]\s*(.+)$", re.M)
 
 
 def _result_verdict(p: Path) -> str:
-    """RESULT.md 首个顶层「- 结论：」（忽略引用块里的历史结论），归一成 verify_state 的状态词。"""
-    m = _RESULT_VERDICT_RE.search(read(p))
+    """RESULT.md 的结论 → verify_state 的状态词；确实解析不出时返回 ""。"""
+    text = read(p)
+    if _vs_verdict_text is not None:
+        return _vs_classify(_vs_verdict_text(text)) or ""
+    m = _RESULT_VERDICT_RE.search(text)                     # 兜底：verify_state 不可导入时
     if not m:
         return ""
-    # 只看结论开头（图标 + 第一个词），括号里的补充说明（「失败分支未验」）不算结论
     head = re.split(r"[（(：:，,；;]", m.group(1).strip(), 1)[0]
     icon = {"✅": "通过", "❌": "失败", "⏭": "跳过", "⛔": "阻塞"}
     for k, v in icon.items():
@@ -858,17 +945,29 @@ def check_state_vs_result(d: Path) -> None:
     except json.JSONDecodeError:
         return
     bad = []
+    unparsed = []
     for ac, c in sorted(cases.items()):
         r = d / "tests" / ac / "RESULT.md"
         if not r.exists():
             continue
         rv, sv = _result_verdict(r), c.get("status", "")
-        if rv and sv and rv != sv:
+        if not rv:
+            # 解析不出**不再等于放行**：显式列出来（老证据常见），但不硬 FAIL 历史目录，
+            # 否则升级后所有旧需求目录会在交付门禁前炸掉。
+            unparsed.append(ac)
+            continue
+        if sv and rv != sv:
             bad.append(f"{ac}（状态={sv} / RESULT={rv}）")
     if bad:
         add(FAIL, "用例状态 vs RESULT", f"{len(bad)} 条不一致: {bad[:8]}（以 RESULT 为准回写 verify_state，或改 RESULT）")
+    elif unparsed:
+        add(WARN, "用例状态 vs RESULT", "全部可解析的条目一致（另有解析不出的见下）")
     else:
         add(OK, "用例状态 vs RESULT", "verify_state 状态与各 RESULT.md 结论一致")
+    if unparsed:
+        add(WARN, "RESULT 结论可解析性",
+            f"{len(unparsed)} 条 RESULT.md 解析不出结论、未参与比对: {unparsed[:8]}"
+            f" —— 顶层写 `- 结论：<状态词>` 或表格行 `| 结论 | <状态> |`（见 doc-output 证据格式）")
 
 
 def _expand_r_list(s: str) -> set[int]:
@@ -917,18 +1016,25 @@ def check_handover_fresh(d: Path, wf: str) -> None:
             f"比 {newest.relative_to(d)} 早 {lag_h:.0f} 小时 —— 逐节核对账号 / 环境 / 回归 / 已知限制是否仍是当前口径，核对后保存一次")
 
 
-def check_earlier_steps(d: Path, wf: str, final_step: int) -> None:
+def check_earlier_steps(d: Path, wf: str, final_step: int, skipped: set[int] | None = None) -> None:
     """交付门禁：前序各步按「当前」产出物重跑一遍（不写状态）。
 
     .workflow-state.json 里的绿灯只代表「登记那一刻」通过；之后改了 Checklist / 矩阵 / 回归清单，
     旧绿灯不会自己变红（CP-58118：矩阵漏了后加的 AC-94，Step8 绿了两天）。
+
+    `skipped` = Spec 文首分流声明里写明跳过的步（B/C 路径）。不认这些声明，
+    B/C 路径会在这一步被判「产出物 未找到」而不可能通过 —— 分流就等于没实现。
     """
     import os
     if os.environ.get("VALIDATE_NO_RECHECK"):
         return
-    env = dict(os.environ, VALIDATE_NO_RECHECK="1", PYTHONIOENCODING="utf-8")
+    skipped = skipped or set()
+    env = dict(os.environ, VALIDATE_NO_RECHECK="1", PYTHONIOENCODING="utf-8",
+               PYTHONDONTWRITEBYTECODE="1")
     bad = []
     for s in range(1, final_step):
+        if s in skipped:
+            continue
         try:
             out = subprocess.run([sys.executable, __file__, "--dir", str(d), "--workflow", wf, "--step", str(s)],
                                  capture_output=True, text=True, encoding="utf-8", errors="replace",
@@ -937,10 +1043,11 @@ def check_earlier_steps(d: Path, wf: str, final_step: int) -> None:
             bad.append(f"Step{s}: 复检未能运行（{e}）")
             continue
         bad += [f"Step{s}: {ln.strip()[2:].strip()[:80]}" for ln in out.splitlines() if ln.strip().startswith("❌") and "项未通过" not in ln]
+    scope = f"Step1~{final_step - 1}" + (f"（按分流声明跳过 {sorted(skipped)}）" if skipped else "")
     if bad:
         add(FAIL, "前序步骤复检", f"{len(bad)} 项按当前产出物已不通过（旧绿灯过期）: {bad[:6]}（修好后补跑该步 --record）")
     else:
-        add(OK, "前序步骤复检", f"Step1~{final_step - 1} 按当前产出物全部通过")
+        add(OK, "前序步骤复检", f"{scope} 按当前产出物全部通过")
 
 def check_tasks_done(d: Path, wf: str, spec, scope: str = "coding") -> None:
     """tasks.md 不得留未勾选项（`- [ ]`）—— 没做完的任务要么做完勾上，要么写明取消 / 移交原因后勾上。
@@ -1060,6 +1167,7 @@ SHARED_FILES = ["references/browser-verification-playbook.md",
                 "references/evidence-acceptance.md",
                 "references/test-handover.md",
                 "references/lesson-harvest.md",
+                "references/self-review.md",
                 "scripts/preflight.py",
                 "scripts/verify_state.py",
                 "scripts/verify_dashboard.py",
@@ -1070,7 +1178,7 @@ SHARED_FILES = ["references/browser-verification-playbook.md",
                 "scripts/checklist_jira.py",
                 "scripts/annotate.js",
                 "scripts/surefire_aggregate.py",
-                "scripts/distribute.py",]
+                ]
 SIBLING = {"ai-driven-fullstack-workflow": "ai-driven-backend-workflow",
            "ai-driven-backend-workflow": "ai-driven-fullstack-workflow"}
 
@@ -1126,6 +1234,20 @@ def check_shared_drift(skill_dir: Path) -> None:
             f"{drift} 与 {sib_name} 不一致 —— 若非有意，两个 workflow 的行为已经不同了")
     elif not missing:
         add(OK, "共用文件一致", f"{len(SHARED_FILES)} 个共用文件与 {sib_name} 逐字相同")
+
+
+def check_review_due(skill_dir: Path, days: int = 7) -> None:
+    """定期自检到期提醒：REVIEW.md 第一行「上次 review」距今 ≥ days 天 → WARN（流程见 references/self-review.md）。"""
+    f = skill_dir / "REVIEW.md"
+    m = re.search(r"上次 review[：:]\s*(\d{4}-\d{2}-\d{2})", read(f)) if f.exists() else None
+    if not m:
+        add(WARN, "定期自检", "没有 REVIEW.md 或缺「上次 review」日期 → 按 references/self-review.md 做一次")
+        return
+    age = (datetime.date.today() - datetime.date.fromisoformat(m.group(1))).days
+    if age >= days:
+        add(WARN, "定期自检", f"上次 review {m.group(1)}，已 {age} 天 → 主任务收尾后按 references/self-review.md 做一次")
+    else:
+        add(OK, "定期自检", f"上次 review {m.group(1)}（{age} 天前）")
 
 
 def check_skill_self(skill_dir: Path) -> None:
@@ -1202,6 +1324,85 @@ STEP_TOPICS = {
     "global-consistency-review": ["全局一致性审查"],
     "ac-subtask-handover": ["AC ↔ Subtask", "AC-Subtask", "Subtask 匹配与提测"],
 }
+
+
+
+def _lesson_titles(skill_dir: Path) -> dict[int, str]:
+    """LNN → 标题（去掉末尾括号里的适用步骤，用于跨 skill 比对）。"""
+    lf = skill_dir / "references" / "lessons-learned.md"
+    if not lf.exists():
+        return {}
+    return {int(n): re.sub(r"\s*[（(][^（）()]*[）)]\s*$", "", t).strip()
+            for n, t in re.findall(r"^### L(\d+)\.\s*(.+)$", read(lf), re.MULTILINE)}
+
+
+_LREF = re.compile(r"(?<![A-Za-z0-9])L(\d{1,2})(?![0-9])")
+# L0~L3 在本 skill 里也指「沉淀层级 / 跑测分层」（L0 技能级、L1 项目级、L2 一次性；L1/L2/L3 跑测），不是 lesson 编号
+_LAYER_CTX = re.compile(r"^\s*\|\s*\*\*L\d|L\d\s*/\s*L\d|L[0-3]\s*(?:\*\*)?\s*(?:技能级|项目级|一次性|全局|现有项目|页面层|跑测|层)|分层|层级")
+
+
+def _similar(a: str, b: str) -> bool:
+    """标题相似（字符二元组 Dice ≥ 0.18；同一条经验两边标题常只共享关键词，如「新增接口一切随大流」/「新增接口优先参考同类接口」）：两边措辞不同但说的是同一条经验，不算指错。"""
+    def grams(x: str) -> set[str]:
+        x = re.sub(r"\W", "", x)
+        return {x[i:i + 2] for i in range(len(x) - 1)} or {x}
+    ga, gb = grams(a), grams(b)
+    if 2 * len(ga & gb) / (len(ga) + len(gb)) >= 0.18:
+        return True
+    # 共享一段 ≥4 字的关键词（如「新增接口」）也算同一条：长标题稀释了 Dice
+    x, y = re.sub(r"\W", "", a), re.sub(r"\W", "", b)
+    return any(x[i:i + 4] in y for i in range(len(x) - 3))
+
+
+def check_lesson_step_refs(skill_dir: Path) -> None:
+    """跨 workflow 复制的句子里，`LNN` 必须指向标题相同的 lesson。
+
+    两个 workflow 的 lessons 各自编号。`check_skill_self` 只查编号存在；从另一边复制一句话时编号
+    「存在但指错条目」它看不出来（2026-10-14 review：后端 3 处照搬全栈的 L 编号）。
+    做法：把两边 md 的每行里的 LNN 换成占位符后比对，同一句话在两边引用的 lesson 标题必须一致。
+    """
+    sib = SIBLING.get(skill_dir.name)
+    if not sib:
+        return
+    sib_dir = skill_dir.parent / sib
+    mine, theirs = _lesson_titles(skill_dir), _lesson_titles(sib_dir)
+    if not mine or not theirs or not sib_dir.exists():
+        return
+
+    def index(d: Path) -> dict[str, list[list[int]]]:
+        out: dict[str, list[list[int]]] = {}
+        for f in d.rglob("*.md"):
+            if f.name in ("lessons-learned.md", "REVIEW.md"):
+                continue
+            for line in read(f).splitlines():
+                nums = [int(n) for n in _LREF.findall(line)]
+                if nums:
+                    out.setdefault(_LREF.sub("L#", line.strip()), []).append(nums)
+        return out
+
+    sib_idx = index(sib_dir)
+    bad = []
+    for f in sorted(skill_dir.rglob("*.md")):
+        if f.name in ("lessons-learned.md", "REVIEW.md"):
+            continue
+        for i, line in enumerate(read(f).splitlines(), 1):
+            nums = [int(n) for n in _LREF.findall(line)]
+            if not nums or _LAYER_CTX.search(line):
+                continue
+            for other in sib_idx.get(_LREF.sub("L#", line.strip()), []):
+                if len(other) != len(nums):
+                    continue
+                for a, b in zip(nums, other):
+                    ta, tb = mine.get(a), theirs.get(b)
+                    if ta and tb and not _similar(ta, tb):
+                        bad.append(f"{f.relative_to(skill_dir)}:{i} 写 L{a}「{ta[:18]}」，{sib} 同一句是 L{b}「{tb[:18]}」")
+                break
+    if bad:
+        add(FAIL, "跨 skill lesson 编号",
+            "; ".join(bad[:6]) + (f" …共 {len(bad)} 处" if len(bad) > 6 else "")
+            + " —— 同一句话两边引用的 lesson 标题不同：多半是复制时没换编号")
+    else:
+        add(OK, "跨 skill lesson 编号", "两个 workflow 同一句话引用的 lesson 标题一致")
 
 
 def check_step_refs(skill_dir: Path) -> None:
@@ -1356,7 +1557,7 @@ def main() -> None:
                     help="只校验 skill 自身（lessons 编号引用是否自洽），不需要 --dir")
     ap.add_argument("--workflow", choices=["fullstack", "backend"], default="fullstack")
     ap.add_argument("--step", type=int, help="只校验某一步")
-    ap.add_argument("--all", action="store_true", help="校验到目前为止的全部产出")
+    ap.add_argument("--all", action="store_true", help="校验全部步骤（含尚未开工的后续步，它们会因缺产出物报 FAIL；只想看进度/续跑点用 --status）")
     ap.add_argument("--record", action="store_true", help="把结果写入 .workflow-state.json")
     ap.add_argument("--status", action="store_true", help="打印流程状态与续跑点")
     ap.add_argument("--max-attempts", type=int, default=2,
@@ -1370,10 +1571,12 @@ def main() -> None:
         skill_dir = Path(__file__).resolve().parent.parent
         check_skill_self(skill_dir)
         check_step_refs(skill_dir)
+        check_lesson_step_refs(skill_dir)
         check_bughunt_letter(skill_dir)
         check_principle_refs(skill_dir)
         check_reference_links(skill_dir)
         check_shared_drift(skill_dir)
+        check_review_due(skill_dir)
         icon = {OK: "✅", WARN: "⚠️ ", FAIL: "❌"}
         print("skill 自检 @ " + skill_dir.name)
         print()
@@ -1407,16 +1610,37 @@ def main() -> None:
     rs: list[int] = []
 
     check_qa_changes(d)
+    kind, skipped, refused = declared_skips(d, spec, args.workflow)
+    if kind or skipped or refused:
+        detail = "变更类型=" + (kind or "未声明")
+        if skipped:
+            detail += "；按声明跳过 " + str(["Step%d" % s for s in sorted(skipped)])
+        if refused:
+            detail += ("；" + str(["Step%d" % s for s in sorted(refused)])
+                       + " 声明跳过但不允许（流程骨架 / 交付门禁步），仍照常核对")
+        add(OK, "分流声明", detail)
     for step in steps:
         if step not in spec:
             add(WARN, f"Step{step}", "该 workflow 无此步骤定义，跳过")
             continue
-        check_exists(d, step, spec)
+        if step in skipped:
+            add(OK, f"Step{step} {spec[step][0]}", "按 Spec 分流声明跳过（不检查产出物）")
+            continue
+        if step == CODING_STEP[args.workflow] and TASKS_STEP[args.workflow] in skipped:
+            # 编码步的机器产出物是 `Step 9-tasks.md` 的勾选状态（代码本身判不了）。
+            # C 路径（bugfix）跳过任务拆解步，这时不该反过来用 tasks.md 卡住编码步。
+            add(OK, f"Step{step} {spec[step][0]}",
+                f"产出物是业务代码；Step{TASKS_STEP[args.workflow]} 按分流声明跳过，不查 tasks 勾选")
+        else:
+            check_exists(d, step, spec)
         if step in (1, 2, 3):
             check_pm_pending(d, step)
         if step == 3:
             acs = check_checklist(d, spec)
             check_checklist_quality(d, spec)
+            check_checklist_jira_txt(d, spec)
+        if step == 5:
+            check_ddl_rollback(d, spec)
         if step == MATRIX_STEP[args.workflow]:
             acs = acs or check_checklist(d, spec)
             check_matrix_covers_ac(d, acs, args.workflow, spec)
@@ -1446,7 +1670,7 @@ def main() -> None:
             check_evidence_acceptance(d, acs, args.workflow)
             check_state_vs_result(d)
             check_regression_summary(d, args.workflow, rs)
-            check_earlier_steps(d, args.workflow, step)
+            check_earlier_steps(d, args.workflow, step, skipped)
         if step == HANDOVER_STEP[args.workflow]:
             check_ac_subtask_handover(d)
 

@@ -13,9 +13,9 @@
 ## 二、怎么取
 
 ```bash
-python scripts/figma_cache.py --dir "docs/develop/<需求目录>" --urls "<链接1>" "<链接2>" ...
-python scripts/figma_cache.py --dir "..." --urls-file links.txt   # 链接多时一行一个
-python scripts/figma_cache.py --dir "..." --refresh              # 设计稿更新后按已有节点重拉
+py scripts/figma_cache.py --dir "docs/develop/<需求目录>" --urls "<链接1>" "<链接2>" ...
+py scripts/figma_cache.py --dir "..." --urls-file links.txt   # 链接多时一行一个
+py scripts/figma_cache.py --dir "..." --refresh              # 设计稿更新后按已有节点重拉
 ```
 
 - **令牌**：环境变量 `FIGMA_API_KEY`（或 `FIGMA_TOKEN`）。脚本只读环境变量，**不打印、不写进任何文件**。

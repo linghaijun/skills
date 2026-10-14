@@ -60,7 +60,7 @@ const HOSTJS = `(() => { const root = document.querySelector('#app')?.__vue_app_
   window.__uc = hit?.setupState; return !!hit; })()`;
 const hs = () => c.ev(`(() => { const s = window.__uc; if (!s) return null; const un = v => v && typeof v === 'object' && 'value' in v && !Array.isArray(v) ? v.value : v; const a = s.assist; const t = a ? un(a.tab) : null; const fd = un(s.formData);
   return { adType: fd.adTypeNode ? fd.adTypeNode.productLine + '|' + fd.adTypeNode.adType : null, resultType: fd.resultType, prompt: fd.prompt, pdRunning: t?.pdTask?.running, hookRunning: t?.hookTask?.running, hooks: (t?.hookResult?.sellingPoints || []).length, selection: t?.selection ? { sp: t.selection.sellingPointIndex, c: t.selection.conceptIndex } : null, canGenerate: un(s.canGenerate), tip: un(s.generateDisabledTip) }; })()`);
-const waitH = async (fn, ms = 180000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { await c.ev(HOSTJS); const s = await hs(); log.lastH = s; if (s && fn(s)) return s; await c.sleep(1000); } flush(); throw new Error("waitH timeout " + JSON.stringify(log.lastH).slice(0, 800)); };
+const waitH = async (fn, ms = 180000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { await c.ev(HOSTJS); const s = await hs(); log.lastH = s; if (s && fn(s)) return s; await c.sleep(Math.min(500, Math.max(150, Date.now() - t0))); } flush(); throw new Error("waitH timeout " + JSON.stringify(log.lastH).slice(0, 800)); };
 const quota = () => c.ev(`[...document.querySelectorAll('span')].find(s => /^Quota:/.test(s.innerText.trim()) && s.getBoundingClientRect().width > 0)?.innerText.trim()`);
 
 // ---------- 布景（整页 reload 清掉之前的内存补丁）
@@ -177,13 +177,17 @@ if (!sub || sub.status !== 200 || !jobId) {
   c.close(); process.exit(0);
 }
 let final = null;
-for (let i = 0; i < 200; i++) {
-  await c.sleep(2000);
+// 等 AI 任务终态：旧写法 200×2s 固定轮询（粒度粗、且超时后静默继续）；现在自适应轮询 + onPoll 记录进度尾巴
+const readProgress = () => {
   const prog = list().filter((e) => e.t >= clickAt && /async\/progress/.test(e.url) && J(e.body)?.data);
   const last = J(prog[prog.length - 1]?.body)?.data;
   log.progressTail = prog.slice(-2).map((e) => { const d = J(e.body).data; return { status: d.status, percent: d.percent }; });
-  if (last && (last.status === "SUCCESS" || last.status === "FAILED")) { final = last; break; }
-}
+  return last || null;
+};
+try {
+  final = (await c.waitFor("1", { total: 400000, min: 200, max: 600, label: "ai-final", onPoll: () => readProgress(), until: () => { const l = readProgress(); return !!l && (l.status === "SUCCESS" || l.status === "FAILED"); } })).value;
+  final = readProgress();
+} catch { final = readProgress(); log.finalTimeout = true; }
 log.final = final && { status: final.status, percent: final.percent, errorMsg: final.errorMsg, resultKeys: Object.keys(final.result || {}) };
 flush();
 await c.sleep(3500);

@@ -29,17 +29,17 @@
                       —— 端口、账号、profile 一一对应，见 playbook 2.1 / 12
 
 用法（示例都是一行，Windows 下直接用）:
-    python verify_state.py init    --dir docs/develop/xxx [--acs AC-01,AC-02] [--from-result]   # 按 tests/AC-NN/RESULT.md 结论回填历史状态
-    python verify_state.py list    --dir docs/develop/xxx
-    python verify_state.py mine    --dir docs/develop/xxx --session s1
-    python verify_state.py claim   --dir docs/develop/xxx --ac AC-01 --session s1 --window tab:1234
-    python verify_state.py fix     --dir docs/develop/xxx --ac AC-01 --session s1 --note "问题摘要"
-    python verify_state.py finish  --dir docs/develop/xxx --ac AC-01 --session s1 --status 通过
-    python verify_state.py reclaim --dir docs/develop/xxx --ac AC-01 --session s2 --window tab:9999
-    python verify_state.py final   --dir docs/develop/xxx --ac ALL  --session s1 --status 终验中
-    python verify_state.py final   --dir docs/develop/xxx --ac AC-01 --session s1 --status 终验通过 --note "证据支撑结论"
-    python verify_state.py invalidate --dir docs/develop/xxx --acs AC-03,AC-07 --reason "16:20 改 AiProgressBar 过渡时长" [--session s1]
-    python verify_state.py backfill-duration --dir docs/develop/xxx [--acs AC-01,AC-02] [--dry-run] [--force]
+    py verify_state.py init    --dir docs/develop/xxx [--acs AC-01,AC-02] [--from-result]   # 按 tests/AC-NN/RESULT.md 结论回填历史状态
+    py verify_state.py list    --dir docs/develop/xxx
+    py verify_state.py mine    --dir docs/develop/xxx --session s1
+    py verify_state.py claim   --dir docs/develop/xxx --ac AC-01 --session s1 --window tab:1234
+    py verify_state.py fix     --dir docs/develop/xxx --ac AC-01 --session s1 --note "问题摘要"
+    py verify_state.py finish  --dir docs/develop/xxx --ac AC-01 --session s1 --status 通过
+    py verify_state.py reclaim --dir docs/develop/xxx --ac AC-01 --session s2 --window tab:9999
+    py verify_state.py final   --dir docs/develop/xxx --ac ALL  --session s1 --status 终验中
+    py verify_state.py final   --dir docs/develop/xxx --ac AC-01 --session s1 --status 终验通过 --note "证据支撑结论"
+    py verify_state.py invalidate --dir docs/develop/xxx --acs AC-03,AC-07 --reason "16:20 改 AiProgressBar 过渡时长" [--session s1]
+    py verify_state.py backfill-duration --dir docs/develop/xxx [--acs AC-01,AC-02] [--dry-run] [--force]
 
 退出码:
     0 = 正常
@@ -86,8 +86,13 @@ def die(msg: str, code: int = 2) -> int:
 
 
 @contextmanager
-def file_lock(path: Path, timeout: float = 3.0):
-    """跨进程互斥：用 O_EXCL 建锁文件。拿到锁才允许读-改-写登记文件。"""
+def file_lock(path: Path, timeout: float = 3.0, stale_after: float = 600.0):
+    """跨进程互斥：用 O_EXCL 建锁文件。拿到锁才允许读-改-写登记文件。
+
+    进程被强杀（后台命令超时被杀也算）时 `finally` 不执行，锁文件会残留 —— 之后**所有**登记
+    写操作都 exit 2、`--force` 也无效、文档也没给恢复路径。所以超过 `stale_after`（默认 10 分钟，
+    远大于一次读改写的正常耗时）就按陈旧锁回收，并说明回收了谁的锁。
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     deadline = time.time() + timeout
     fd = None
@@ -96,8 +101,22 @@ def file_lock(path: Path, timeout: float = 3.0):
             fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_RDWR)
             break
         except FileExistsError:
+            try:
+                age = time.time() - path.stat().st_mtime
+            except OSError:
+                continue                                  # 锁刚好被别人释放，立刻重试
+            if age > stale_after:
+                print(f"[verify-state] 回收陈旧锁 {path}（{age / 60:.0f} 分钟前留下的，"
+                      f"疑似上次进程被强杀）", file=sys.stderr)
+                try:
+                    os.remove(str(path))
+                except OSError:
+                    pass
+                continue
             if time.time() > deadline:
-                raise TimeoutError("登记文件被占用（" + str(path) + "），请稍后重试")
+                raise TimeoutError("登记文件被占用（" + str(path) + "），请稍后重试；"
+                                   "若确认没有别的会话在验证（例如上次进程被强杀），"
+                                   "可删掉该锁文件后重试（超过 10 分钟的锁会自动回收）")
             time.sleep(0.05)
     try:
         yield
@@ -124,7 +143,17 @@ def save(d: Path, st: dict) -> None:
     p = d / REG_REL
     tmp = p.with_suffix(p.suffix + ".tmp")
     tmp.write_text(json.dumps(st, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
-    os.replace(tmp, p)  # 原子替换：并发下别的会话不会读到半截 JSON
+    # 原子替换：并发下别的会话不会读到半截 JSON。
+    # Windows 上目标文件正被读（常驻看板每 5s 轮询它）时 os.replace 会短暂 PermissionError，
+    # 重试几次即可 —— qa_record.py / verify_dashboard.py 早就这么做，这里原来没有。
+    for i in range(6):
+        try:
+            os.replace(tmp, p)
+            return
+        except PermissionError:
+            if i == 5:
+                raise
+            time.sleep(0.15)
 
 
 def age_minutes(ts) -> float:
@@ -505,6 +534,12 @@ def cmd_final(args) -> int:
     ttl = args.ttl
     with file_lock(d / LOCK_REL):
         st = load(d)
+        if not st.get("cases"):
+            # 空登记时 --ac ALL 会「处理 0 条」并以 exit 0 收尾 —— 一个 🔴 阻塞门就这样空转了
+            # （11.4 被跳过、从未 init 的目录最常见）。这里直接停：先 init 再终验。
+            return die("登记文件里一条 AC 都没有（" + str(d / REG_REL) + "），"
+                       "先跑 `verify_state.py init --dir <需求目录> --from-result` 把用例登记进来，"
+                       "再终验；否则 --ac ALL 会空转通过。", 2)
         targets = sorted(st["cases"], key=ac_key) if args.ac == "ALL" else [args.ac]
         touched, skipped, passed, failed = [], [], [], []
         for ac in targets:

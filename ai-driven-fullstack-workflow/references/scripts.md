@@ -16,20 +16,26 @@
 | `scripts/qa_record.py` | **Step1 全程；之后每步开始前跑 `changes`** | Step1 问答记录（一个问题一节）的解析 / 写回 / 质量检查（缺问题描述 FAIL）/ 待 PM 清单导出（md、csv）/ 产品确认分享令牌（`.pm-share.json`）；看板上的改动登记在 `.qa-changes.json`，`changes` 列出改前改后（退出码 3 = 有待确认），用户确认并同步下游后 `ack`，不认可 `reject` 恢复 |
 | `scripts/checklist_jira.py` | **Step3 每次改 Checklist 后** | 从 Checklist 机械生成 Jira 纯净版（去掉「图示」行与来源括注，按 `[Story号]` 拆分），不再手工复制 |
 | `scripts/annotate.js` | **Step3 出标注截图时** | 注入原型 / 测试页面后 `window.__ann(...)` 画红框 + 编号 + 说明 + 连线，说明下自动加「对应 AC」；配合 Playwright 截图存到需求目录 `UI/`（做法见 step-03「标注截图怎么做」） |
-| `scripts/validate_step.py` | **每步产出后，Review 之前** | 产出物存在且非空、`AC-NN` 全局唯一、矩阵覆盖每条 AC、tasks 绑定 AC、每 AC 有证据目录与复跑入口、回归项有结论、交付前无 `[open]`、技术设计有证据标注且无「通常/应该是/按惯例」这类未取证措辞、**代码改了但对应文档没改**（Step12/13，见 §2）、**矩阵无模糊预期/无折叠省略/分支均标优先级** |
+| `scripts/validate_step.py` | **每步产出后，Review 之前** | 产出物存在且非空、`AC-NN` 全局唯一、矩阵覆盖每条 AC、tasks 绑定 AC、每 AC 有证据目录与复跑入口、回归项有结论、交付前无 `[open]`、技术设计有证据标注且无「通常/应该是/按惯例」这类未取证措辞、**代码改了但对应文档没改**（Step12/13，见 §2）、**矩阵无模糊预期/无折叠省略/分支均标优先级**；编码步只查 tasks 编码任务组（「回归任务」组留到交付门禁）；测试步与交付门禁查**用例状态 vs RESULT**；交付门禁（fullstack Step13）另查 tasks 全部勾选、**回归清单汇总 vs 各行**、交接文档时效、证据验收判定，并**按当前产出物重跑前序各步**（旧绿灯过期即 FAIL）。R-NN 结论只认结论词前同一分句里没有否定词的写法 |
 | `scripts/verify_state.py` | **11.4 并行验证时认领/收尾每条 AC；11.6 证据终验** | 用例状态登记（待验证/验证中/修复中/通过/失败/…）+ **证据终验**（`final` 子命令：未终验/终验中/终验通过/终验不通过/**豁免**，只核对证据不重跑浏览器；`豁免` 仅限用户明确放行、Checklist 置 `[waived]` 时用，`--note` 必写放行范围与用户原话）+ 会话与窗口标识归属；锁文件保证多会话不抢同一条 AC，超时的可 reclaim；`init --from-result` 支持老需求按 RESULT.md / Step 1x 报告回填；**`invalidate` 改代码后作废受影响 AC**（打回待验证 + 终验作废 + 记时间原因）；`backfill-duration` 按 NOTES 用时 / 证据时间回填耗时；**每次登记成功后自动刷新看板**（`--no-dashboard` 才跳过） |
 | `scripts/surefire_aggregate.py` | **引用单测作为 AC 证据时** | 复制当次 surefire `TEST-*.xml` 全集进 `tests/_unit/<批次>/`，按 classname 跨文件聚合计数 + md5（surefire 并行会把用例记进别的类的 XML） |
 | `scripts/figma_cache.py` | **用户给出 Figma 链接时；设计稿更新后 `--refresh`** | 按链接缓存 Figma 节点到 `figma/<节点>/`（2x 截图、`design.md` 层级 / 文案 / 色值 / 间距 / 字号、`node.json`）并生成索引；重跑保留已填的区域 / AC 列与样式、差异两段。令牌只读环境变量 `FIGMA_API_KEY`，不打印不落盘 |
-| `scripts/verify_dashboard.py` | **看板服务常驻；手工改动后 / 11.4.3 收尾 / 11.6 终验后** | 生成《验证进度看板.html》（单需求：整体进度+用例状态+**证据终验**+证据+耗时，轮询 `tests/.verify-state.json` 实时刷新）与外层 `docs/develop/index.html`（所有进行中需求总览，排除 archived/tools，可切换）；**`--serve` 模式**（打开看板一律用它，见 SKILL.md 执行指令 1.5）：内容随磁盘实时更新（每次请求现场解析）、「需求问答」页签可编辑保存、需求列表可**归档**（标记已完成 → 移到 `archived/`，「已归档」入口可查看 / 恢复）；`validate_step.py --record` 会顺带重建看板 |
+| `scripts/verify_dashboard.py` | **看板服务常驻；手工改动后 / 11.4.3 收尾 / 11.6 终验后** | 生成《验证进度看板.html》（单需求：整体进度+用例状态+**证据终验**+证据+耗时；**静态打开是生成时快照、不会刷新**，只有 `--serve` 才随磁盘实时更新）与外层 `docs/develop/index.html`（所有进行中需求总览，排除 archived/tools，可切换）；**`--serve` 模式**（打开看板一律用它，见 SKILL.md 执行指令 1.5）：内容随磁盘实时更新（每次请求现场解析）、「需求问答」页签可编辑保存、需求列表可**归档**（标记已完成 → 移到 `archived/`，「已归档」入口可查看 / 恢复）；默认还会起 `0.0.0.0:8786` 的局域网「产品确认」页，不需要就 `--pm-port 0`；`validate_step.py --record` 会顺带重建看板 |
 | `scripts/handover_match.py` | **Step14** | AC↔Subtask 匹配：读 Checklist + Jira Sub-task JSON → 写出映射 md/json；`--apply` 写入 `.handover-state.json`（`已匹配待确认`） |
 | `scripts/handover_state.py` | **Step14** | 提测状态（与验证态分离）：`待匹配`→`已匹配待确认`→终态`已提测`/`无需提测`；映射与 Jira 动作记录写 `.handover-state.json`；转交人默认值见项目 `AGENTS.md`（脚本 `DEFAULT_ASSIGNEE` 写死为 creative-management 的值，其他项目传 `--assignee`） |
-| `scripts/distribute.py` | **已废弃（deprecated）** | 历史遗留，不再维护；分发一律用独立 skill `distribute-agent-skills` |
+| ~~`scripts/distribute.py`~~ | **已移除（2026-10-14）** | 改完本 skill 后分发**必须用独立 skill `distribute-agent-skills`**（`~/.claude/skills/distribute-agent-skills/scripts/distribute.py`，先 `--dry-run`，报告复制数与 MD5 不一致数） |
+
+> 🔴 **解释器：本机 `python` 可能是跑不起来的假别名**（Windows 商店版 `python.exe` —— `where python`
+> 找得到，执行报 `Program 'python.exe' failed to run`）。示例统一写 `py`；若你的环境 `py` 不可用
+> （非 Windows / 未装启动器），换成 `python3` 或 `python` 里能跑的那个 —— 先 `python3 -V` 验一下。
+> `preflight.py` 的「文档命令用的解释器」会替你检查这件事。脚本内部一律用 `sys.executable`
+> 拉起子进程，所以脚本本身不受影响 —— 受影响的只有手敲的命令、文档示例与 `compact_resume` 的 hook。
 
 ```bash
-python scripts/preflight.py --project .
-python scripts/validate_step.py --dir docs/develop/{...} --step 3 --record
-python scripts/validate_step.py --dir docs/develop/{...} --status   # 看进度与续跑点
-python scripts/validate_step.py --self-check                        # 只校验 skill 自身（改完 skill 跑一次）
+py scripts/preflight.py --project .
+py scripts/validate_step.py --dir docs/develop/{...} --step 3 --record
+py scripts/validate_step.py --dir docs/develop/{...} --status   # 看进度与续跑点
+py scripts/validate_step.py --self-check                        # 只校验 skill 自身（改完 skill 跑一次）
 ```
 
 ## 2. 文档同步检查（Step12 / Step13 自动跑）
@@ -75,15 +81,18 @@ python scripts/validate_step.py --self-check                        # 只校验 
 > **改完 skill 之后还要分发**：本机装了多个 agent 工具，各有独立的 `skills` 目录，
 > 不分发 = 换个工具跑的还是旧版，而且**不报错**。分发是独立 skill `distribute-agent-skills`
 > （`~/.claude/skills/distribute-agent-skills/`），顺序固定：**改 → `--self-check` 过 → 分发**。
-> 本 skill 内的 `scripts/distribute.py` 已废弃，不要再用。
+> 本 skill 内的 `scripts/distribute.py` 已移除。改完 skill → `--self-check` 通过 → **用 `distribute-agent-skills` skill 分发**，不分发 = 其他 agent 工具还在用旧版。
 
-`--self-check` 校验 **skill 自身**，退出码 1 即有问题：
+`--self-check` 校验 **skill 自身**，退出码 1 即有问题（实跑输出 10 项，别只看下面 5 条）：
 
 - `LNN` 引用是否都落在本 skill lessons 的有效编号内、计数行是否跟得上、索引表有无漏行
 - `StepN <某步名称>` 是否指向本 skill 真正的那一步；缺陷猎捕清单的维度字母与 Review 步一致
 - 「原则 N」不超过 SKILL.md 核心原则表的行数（表重排后老编号会静默指错）
 - `` `xxx.md` `` 指向的 reference 文件存在；`` `xxx.md` §N `` / `playbook §N` 的章节号在目标文件里能找到（尽力而为）
-- 与另一个 workflow 共用的文件（playbook 的 core / evidence / parallel 与索引、evidence-acceptance、test-handover、lesson-harvest、共用脚本）有没有漂移，报告**真实差异行数**（difflib；步号与 `LNN` 先归一化）。`browser-playbook-tools-cdp.md` 有意不在共用列表：§3 第 6/7 条仅前端适用
+- **跨 skill lesson 编号**：两个 workflow 里**同一句话**引用的 `LNN`，标题必须对得上（逐字同句才比，见下）
+- **缺陷猎捕维度**：`bug-hunting-checklist.md` 的维度字母与 Review 步声明的一致
+- **定期自检**：`REVIEW.md` 的「上次 review」距今 ≥7 天就 WARN（只在这一条检查里跑，正常每步 `--step N` 时不跑）
+- 与另一个 workflow 共用的文件（完整列表以 `validate_step.py` 的 `SHARED_FILES` 为准：playbook 的 core / evidence / parallel 与索引、evidence-acceptance、test-handover、lesson-harvest、subagent-acceleration、context-compaction、看板前端与共用脚本）有没有漂移，报告**真实差异行数**（difflib；步号与 `LNN` 先归一化）。`browser-playbook-tools-cdp.md` 有意不在共用列表：§3 第 6/7 条仅前端适用
 
 > 两个 workflow 的 lessons 是**各自独立编号**的（同一条经验在两边的编号往往不同），
 > 内容从一边复制到另一边时 `LNN` 会**静默指向错误条目** —— 不报错、不影响运行，执行时却对照到了别的 lesson。**已实际发生两次**。

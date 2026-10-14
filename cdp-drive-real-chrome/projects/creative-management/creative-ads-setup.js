@@ -43,19 +43,23 @@
 
   const out = { steps: [] };
   return (async () => {
-    // ── 步骤 0：复位平台范围（否则多选累加，见坑 1）
+    // ── 步骤 0：复位平台范围（否则多选累加，见 README「内建解决的三个坑」1 / SCRIPTS 坑 6）
     if (DO_RELOAD) {
       out.steps.push("reload");
       location.reload();
       return JSON.stringify({ ...out, pending: "reloading" }, null, 1);
     }
 
-    // ── 步骤 1：素材类型页签
+    // ── 步骤 1：素材类型页签（轮询自适应：出现即返回，不再固定 1s 粒度）
     if (FT) {
       let e = null;
-      for (let i = 0; i < 30 && !e; i++) {
-        e = [...document.querySelectorAll(".file-type-tab")].find((x) => tx(x) === FT);
-        if (!e) await sleep(1000);
+      {
+        const t0 = Date.now(), budget = 30000;
+        for (;;) {
+          e = [...document.querySelectorAll(".file-type-tab")].find((x) => tx(x) === FT);
+          if (e || Date.now() - t0 >= budget) break;
+          await sleep(Math.min(500, Math.max(100, Date.now() - t0)));
+        }
       }
       if (!e) out.steps.push("miss-file-type:" + FT);
       else if (isOn(e)) out.steps.push("file-type-already:" + FT);
@@ -66,12 +70,16 @@
       await sleep(4000);
     }
 
-    // ── 步骤 2：平台页签（组件可能刚重建，轮询等它出现，见坑 2）
+    // ── 步骤 2：平台页签（组件可能刚重建，轮询等它出现；自适应粒度）
     if (PT) {
       let e = null;
-      for (let i = 0; i < 40 && !e; i++) {
-        e = [...document.querySelectorAll(".platform-tab__btn")].find((x) => tx(x) === PT);
-        if (!e) await sleep(1000);
+      {
+        const t0 = Date.now(), budget = 40000;
+        for (;;) {
+          e = [...document.querySelectorAll(".platform-tab__btn")].find((x) => tx(x) === PT);
+          if (e || Date.now() - t0 >= budget) break;
+          await sleep(Math.min(500, Math.max(100, Date.now() - t0)));
+        }
       }
       if (!e) out.steps.push("miss-platform:" + PT);
       else {
@@ -81,7 +89,7 @@
       await sleep(3000);
     }
 
-    // ── 步骤 3：必须再点 Search（见坑 3）
+    // ── 步骤 3：必须再点 Search（见 README「内建解决的三个坑」3 / SCRIPTS 坑 7）
     const btn = [...document.querySelectorAll("button,.el-button")].find((e) => tx(e) === "Search");
     if (btn) {
       btn.click();

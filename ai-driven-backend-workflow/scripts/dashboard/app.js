@@ -562,7 +562,7 @@ function detailRow(req,a){if(!state.open.has(a.token))return "";
   '<button class="btn primary" '+evAttrs(a.dir_rel+'/RESULT.md','md','RESULT.md · '+a.token,a.token)+'>RESULT.md</button>'+
   (a.has_replay?'<button class="btn" '+evAttrs(a.dir_rel+'/REPLAY.md','md','REPLAY.md · '+a.token,a.token)+'>REPLAY.md</button>':'')+
   '<button class="btn" '+evAttrs(a.dir_rel+'/case.md','md','case.md · '+a.token,a.token)+'>case.md</button>'+
-  '<span class="lbl sep">结果</span><span class="chip '+vCls+'">'+(r.verdict?esc(r.verdict):'未判定')+'</span>'+
+  '<span class="lbl sep">结果</span><span class="chip '+vCls+'">'+(r.verdict?esc(r.verdict==='NOT_RUN'?'待验证':r.verdict):'未判定')+'</span>'+
   (a.has_replay||a.has_script?'':'<span class="chip bad">缺复跑入口</span>')+'</div>')
   :('<div class="det-actions"><span class="lbl">该 AC 没有 tests/AC-NN 目录，没有原文可看</span></div>');
  const kv='<dl class="kv">'+

@@ -29,7 +29,7 @@
 
 | 目录 | 内容 |
 |---|---|
-| `projects/creative-management/` | Ads 页布景（`creative-ads-setup.js`）+ 通用执行器（`run-page.mjs`）+ **Ads 列表 / KPI / Custom Columns / Group by / 日期 / 同环比（`compare.mjs`）/ 行定位与展开 / 单元格取证 / 分组对账**一整套（2026-10-10）；**图片 Creative 生成页 `creativehub-*`**（页面工具库、驱动库、出图关键帧、网络取证、参考图选取、Demo 内存挂载、文案对照，2026-10-13 CP-58118）；README 见该目录 |
+| `projects/creative-management/` | Ads 页布景（`creative-ads-setup.js`）+ 通用执行器（`run-page.mjs`）+ **Ads 列表 / KPI / Custom Columns / Group by / 日期 / 同环比（`compare.mjs`）/ 行定位与展开 / 单元格取证 / 分组对账**一整套（2026-10-10）；**图片 Creative 生成页 `creativehub-*`**（页面工具库、驱动库、出图关键帧、网络取证、参考图选取、Demo 内存挂载、文案对照，2026-10-13 CP-58118）；**`wait-lib.mjs`**（2026-10-14：本项目「等 loading 遮罩消失」的唯一写法，`makeBusyGone` / `waitBusyGone`，替代手写 1s 轮询、超时抛错）；README 见该目录 |
 
 ---
 
@@ -53,7 +53,11 @@
 | `ctx-isolate.mjs` | 多 BrowserContext 隔离自检（浏览器级连接，自带清理） | 需要账号隔离时（`PARALLEL.md` §2.5 B 方案） | ✅ |
 | `tab-open.mjs` | **并行开窗**：`--open <url> --n 3 --name g1,g2,g3` 同实例开独立窗口，输出 targetId；`--list` / `--close` | 开测前按分组表开窗、登记窗口标识 | ✅ 2026-10-10 |
 | `fresh-entry.mjs` | **「首次进入」模拟**：离开到同源静态资源 → 删偏好 key（可备份）→ 回到页面 | AC 前置「首次进入 / 未做过配置」 | ✅ 2026-10-10 |
-| `wait-idle.mjs` | 等可见 loading 遮罩连续消失 N 次（Pacvue 是 `.pacvue-loading-mask`） | 切日期 / 分组 / 对比之后、读数之前 | ✅ 2026-10-10 |
+| `wait-idle.mjs` | **兼容入口**：2026-10-14 起转发到 `wait-settle.mjs`（旧 CLI 与退出码不变）；旧实现只看遮罩、有「遮罩没了但旧列表还在」的误判 | 旧命令仍可用；**新代码写 `wait-settle.mjs`** | ✅ 2026-10-14（转发，实测退出码/输出兼容） |
+| `wait-settle.mjs` | 🔴 **等到「页面真的就绪」**：网络静默（事件驱动）+ DOM 静默（MutationObserver）+ 无 loading 遮罩 +（可选）行数稳定/等于预期；超时**不抛错**、回 `settled:false` + `reason`，退出码 1。库用法 `waitSettle(c, {...})` | 每次布景/切日期/点 Search 之后、读数之前；取代 `sleep(列表 20~40s)` 与只看遮罩的旧 wait-idle | ✅ 2026-10-14 离线回归 11 例（含 net-timeout / 行数不符 / CLI 退出码） |
+| `export-lib.mjs` | 导出文件解析（**无第三方依赖**）：csv/tsv（BOM、分隔符自动判别）/ json（data·rows·list…）/ **xlsx（自己解 zip + sharedStrings/inlineStr）**；`parseExport(file)` → `{format,rowCount,headers,rows,sha1,error}`；坏文件不抛错 | 导出验证、页面 vs 文件对账；替代项目专用的 openpyxl 脚本 | ✅ 2026-10-14 离线回归（自带 openpyxl 生成的 4145 行 xlsx/csv 对拍一致） |
+| `verify-export.mjs` | 🔴 **导出内容对账**：文件行数/表头/抽样 ↔ 页面 Total；`--find` 查值、`--expect-header` 查列；**`No data found` / Total=0 判为 `no-empty-page` 失败**（防「后端没起」被当成「导出为空」）；产出可引用证据 JSON | 所有导出验证（`export-target.mjs` 只证明"文件落盘 + 打到哪个后端"，不证明内容对不对） | ✅ 2026-10-14 离线回归 18 例（含 4145 vs 4144 不一致、No data found、--find 未命中） |
+| `evidence.mjs` | 🔴 **一步出带红框证据图**：布景 → stage-shot 截图+同帧导几何 → `annotate.py --rects` 框边写字 → 证据 JSON（含 checks）。`--mark "1:Ad Type=说明"`（行:列）、`"1:Ad..1:Spend=说明"`（区间合成一框）、不给则自动框前 2 行前 3 列；`--rects`+`--src` 可离线补图 | 一次证据原来要 4~6 条命令、还要记住"前后各导一次 rects"（漏了就退回，CP-58252） | ✅ 2026-10-14 离线回归 13 例 + 人工目检出图 |
 | `shot.mjs` | 按 `CDP_TARGET` 截图（走 conn.mjs 的防卡死 `shot`） | 与 rects 同状态出原图 | ✅ 2026-10-10 |
 | `storage-restore.mjs` | **测后恢复偏好**：离开到同源静态资源 → 删命中 key → 写回备份 → 回页面 | 🔴 默认**不**跑（用户约定不恢复现场，坑 31）；用户明确要求还原时才用，与 `fresh-entry.mjs --backup` 配对 | ✅ 2026-10-10 |
 | `annotate.py` | 🔴 **证据标注图（默认）**：裁剪 + 放大 + 框边「编号 + 文字」+ 顶部说明带（过长自动折行并告警）；`--rects rects.json --mark "lab=说明"` 吃页面导出的框坐标（截图像素，或 cdp 原始输出），框超出裁剪区直接报错；颜色默认红，`--color` 传黑 / 深灰直接报错（2026-10-13：标注不用黑色） | 所有带红框的证据图；判定点少、需要放大看细节 | ✅ 2026-10-01（自 docs/browser-notes 迁入）；`--rects` 2026-10-13 由 annotate-rects.py 并入（离线回归：与旧脚本产出逐字节一致） |
@@ -93,8 +97,11 @@
 要看接口返回了什么/是否报错    → net-cap.mjs
 要并行跑多组 AC                → tab-open.mjs --open（每组一个 targetId）+ 各组 CDP_TARGET=<id>（L0 / L1 脚本都认，见 PARALLEL.md）
 要证明「首次进入 / 未配置」     → fresh-entry.mjs
-要等列表加载完再读             → wait-idle.mjs
+要等列表加载完再读             → wait-settle.mjs（网络+DOM 静默+遮罩，取代 sleep 猜时长 / 只看遮罩）
 要写多步脚本                   → import { connect } from conn.mjs（别再抄 CDP 客户端）；子 agent / 并行 → sconn.mjs（= hardCap）
+要等某条件成立 / 等它变化      → c.waitFor(expr, { total, until })（自适应退避；超时抛错带 polls/elapsed）
+要一次读多个值                 → c.evAll([expr1, expr2, …])（一次往返；单项抛错为 null）
+要验证导出文件内容对不对       → verify-export.mjs（+ export-lib.mjs 解析；export-target.mjs 只管落盘）
 开测前确认没掉登录              → chk401.mjs（退出码非 0 立即停）
 toast / 滑入动画要截图          → conn.mjs / sconn.mjs 的 snapSame（先 waitStable 再前后 rects 一致）
 窗口被挡住、截图 / 动画卡住     → pump.mjs
@@ -123,6 +130,7 @@ toast / 滑入动画要截图          → conn.mjs / sconn.mjs 的 snapSame（�
 
 > **编号是稳定 ID，不改号**（脚本注释、其它文档按号引用）。2026-10-13 整理只调整了物理顺序（30 归位到 29 之后、16d 归位到 16c 之后、39 归入「点击 / 定位类」），
 > 从 `SKILL.md` 迁入的条目接在现有最大号 39 之后，从 **40** 起编号；另新增 16g、19a、49。没有任何旧号被改动或复用。
+> 之后按时间追加：50（2026-10-13）、51~58（2026-10-14）、59~61（2026-10-14 性能改造轮）。现有编号：0~61 连续无缺号 + 16a~16g、19a；物理顺序按类别 / 日期分节，不按号排。
 
 ### 环境类
 
@@ -195,7 +203,7 @@ toast / 滑入动画要截图          → conn.mjs / sconn.mjs 的 snapSame（�
 14. **几何必须从页面导出，不能靠肉眼在图上量** —— 实测偏了整整一行，且偏得很像真的。
 15. **截图与几何必须同帧导出**，否则滚动/改视口后坐标全废。做法：截图**前后各导一次** rects，`cmp` 逐字节一致才用，两份都作为证据存进 `evidence/`（只存一份时验收无法证明同帧 —— CP-58252 被追问过）。
 16. **裁剪偏移 + 放大倍数的换算要写在标注脚本里**，别指望调用方手算（`annotate.py --rects` 已内置；跨项目复用别的标注脚本时，若它按「裁剪后、放大前」坐标作画，页面导出的原图坐标要在脚本里换算）。
-16a. **loading 中的画面不算页面状态**：截图前读 loading 遮罩数（如 `.el-loading-mask` 可见数 = 0）并从 DOM 读回 Total / 行数，与对应那次列表响应一致才截。切页签 / reload 后旧列表会残留几秒，截到它会得出「页面多了 N 行」的假结论（CP-58252 实测）。
+16a. **loading 中的画面不算页面状态**：截图前读 loading 遮罩数（如 `.el-loading-mask` 可见数 = 0；Pacvue 页面还要算 `.pacvue-loading-mask`，`wait-idle.mjs` 默认已含）并从 DOM 读回 Total / 行数，与对应那次列表响应一致才截。切页签 / reload 后旧列表会残留几秒，截到它会得出「页面多了 N 行」的假结论（CP-58252 实测）。
 16b. **标注图出完必须打开看**：标签会压住相邻行或别的框；压住判定点就删框、换裁剪区或拆两张图。
 16c. **标注颜色一律不用黑色 / 深灰**（截图里黑字、深色控件太多，没有区分度）：默认红 `255,0,0`，需要区分多组时用蓝 `0,112,255` / 橙 `255,128,0` / 绿 `0,170,60` / 洋红 `220,0,180`。`annotate.py` 已拦截深色，`compose.py` 的说明带与面板标签条也已改红（2026-10-13）。
 16d. 🔴 **证据文件名内容用中文（用户硬要求）**，标注文字与证据描述也用中文：文件名 `AC-NN-序号-<中文判定点>-原图/标注.png`（例：`AC-94-r6-03-进度停在100%约0.5秒-标注.png`，权威定义见 workflow `doc-output-and-context.md`「证据文件命名」）；`--title`、`--box` / `--mark` 的说明、`compose.py` 的 `--panel-label`、NOTES / RESULT 里对每个证据文件的说明都写中文。只保留标识符原样：`AC-NN`、`-r6-` 前缀、jobId、字段名、接口路径、页面英文 UI 文案（2026-10-13 用户要求）。
@@ -208,6 +216,7 @@ toast / 滑入动画要截图          → conn.mjs / sconn.mjs 的 snapSame（�
 17. **`.workbuddy/tmp/` 是垃圾场不是资产库** —— 几百个一次性探针，别指望在里面找可复用脚本。
     可复用的都该在 L0/L1。
 18. **Bash 里 `find` / `ls -d ~/.*/` 在本机不可靠**（前者静默返回空，后者 SIGTERM）→ 用 `ls`/`Glob`。
+    实测 2026-10-14：Bash 工具里裸写 `find` 会命中 Windows 的 `FIND.EXE`，报「FIND: Parameter format not correct」；确需 GNU find 写全路径 `/usr/bin/find`。
 19. **分发 / 同步工具的退出码不能当成功证据**：旧 `sync-user-skills.ps1` 的 `Write-Host` 被吞，copy 与 `-VerifyOnly` 都只 exit 0 无输出（实测）
     → 绝不能拿退出码当成功证据，必须看逐文件 md5 比对结果。2026-10-13 起分发改用 `distribute-agent-skills` skill 的 `scripts/distribute.py`（自带逐文件 MD5 校验并打印结果）。
 19a. **维护 `.ps1` 只写 ASCII（或带 UTF-8 BOM）**：Windows PowerShell 5.1 在无 BOM 时按 ANSI 读 `.ps1`，中文会变乱码并导致语法错误。（原 SKILL.md 分发章节，2026-10-13 迁入）
@@ -218,7 +227,7 @@ toast / 滑入动画要截图          → conn.mjs / sconn.mjs 的 snapSame（�
 21. 🔴 **自写 CDP 客户端的超时 `setTimeout` 不 `unref()`，脚本结果早出来了进程还要等到超时才退**（实测每次调用多等 2 分钟，一下午白耗）。用 `conn.mjs`，或脚本末尾 `process.exit(0)`。
 22. 🔴 **正则写在模板字符串里会被吞反斜杠**：`` c.ev(`...replace(/\s+/g,' ')...`) `` 进页面时变成 `/s+/g` —— 不报错，只是把字母 s 换成空格（「Social Ads」→「Social Ad 」、`waitkpi` 永远返回 null、表头「Video\nViews」匹配不上）。
     **页面代码放独立 `.js` 文件原样注入**（`ev.mjs --file`）；必须写在模板里就写 `\\s` / `\\d`，或改 `String.fromCharCode(10)` 这类不含反斜杠的写法。
-23. 🔴 **Agent 的 Bash 工具会把命令文本里的 `\\` 折叠成 `\`**（heredoc、`sed`、`python -c` 全受影响，实测 sed 替换 0 命中、python 报 invalid escape；2026-10-13 维护本 skill 时又踩一次）→ 含反斜杠的文件内容**用 Write / Edit 工具写**，别走 shell。
+23. 🔴 **Agent 的 Bash 工具会把命令文本里的 `\\` 折叠成 `\`**（heredoc、`sed`、`python -c` 全受影响，实测 sed 替换 0 命中、python 报 invalid escape；2026-10-13 维护本 skill 时又踩一次；2026-10-14 review 时 python heredoc 里的替换串 `\\` 被折叠、断言 0 命中，第三次）→ 含反斜杠的文件内容**用 Write / Edit 工具写**，别走 shell。页面正则改成不带反斜杠的写法见坑 51。
 24. 🔴 **「删 localStorage → reload」模拟不了首次进入**：卸载时组件把内存配置写回，key 又带着旧值回来（实测）。用 `fresh-entry.mjs`（先离开到同源静态资源再删）。`about:blank` 不同源，访问不到目标域存储。
 25. 🔴 **`Emulation.setDeviceMetricsOverride` 不会随连接断开可靠撤销**：某次连接设了 3600 宽，之后别的连接 `clearDeviceMetricsOverride` 清不掉，页面一直是 3600（窗口本身是正常大小）。
     → 要么完全不碰视口，要么**每次连接都显式设成确定值**（`conn.mjs` 的 `CDP_VIEWPORT`）；设完读 `innerWidth` 核对。
@@ -245,7 +254,7 @@ toast / 滑入动画要截图          → conn.mjs / sconn.mjs 的 snapSame（�
     2026-10-13 补：`fetch-stub.mjs --until` 与 `creativehub-netcap.mjs` 的 STOP 文件原来没有上限、Ctrl+C 不走收尾（拦截残留在页面上）→ 已加 `--max`（默认 600s）与 SIGINT/SIGTERM 收尾。
 49. 🔴 **页面里自己发请求取证时，令牌不要经过 Node**：先在页面内 `fetch(url, {credentials:'include'})` 直接发；必须复用页面请求头时只在内存、只留鉴权 / 业务类非标准头，不落盘、不打印，并在产出里写明 `authVia`（2026-10-13 安全整改 `creativehub-netcap.mjs` / `creativehub-fields-compare.mjs`）。
 
----
+### 2026-10-13 新增（不抢前台 / 截图兜底）
 
 50. 🔴 **别让 Chrome 抢用户前台：启动必带 4 个防后台参数，`bringToFront` 只作最后兜底**（2026-10-13 实测）：
     `--disable-features=CalculateNativeWinOcclusion --disable-backgrounding-occluded-windows --disable-renderer-backgrounding --disable-background-timer-throttling`
@@ -256,15 +265,43 @@ toast / 滑入动画要截图          → conn.mjs / sconn.mjs 的 snapSame（�
     - **headless（`--headless=new`）不作为主流程**：用户要手动登录、要看得见；同一 profile 不能被两个实例同时打开，headless 与有头实例无法共享登录态
     - **真点击**（`Input.dispatchMouseEvent`）在以上所有状态都生效，不需要前台
     - 老实例没带参数：`shot` 失败两次后才 `bringToFront`，stderr 会提示；**下次重启实例时补上参数**（登录态在 profile 里，重启不用重登）
+    - ⚠️ 2026-10-14 后续实测（坑 57）：短任务进行中、窗口最小化时截图会**隔一次挂一次**（单张等满约 10s；`shot` 已用「连截两次 + 最小化临时恢复」兜底，实测能截到）→ 需要在短窗口内取证时优先别最小化，放到其他窗口后面
 
 ### 2026-10-14 新增（CP-58118 QA 修复验证，g1 / g2）
 
-51. **Bash heredoc 里写的页面 JS 会丢反斜杠**（`\d` 变 `d`、`\n` 变真换行，正则静默失效）：页面表达式的正则写成 `[0-9]`、`[(]`、`[/]` 这种不带反斜杠的形式，或用 Write 工具把脚本写成文件再执行。
+51. （与坑 22、23 同源，本条补充 heredoc 现象与不带反斜杠的正则写法）**Bash heredoc 里写的页面 JS 会丢反斜杠**（`\d` 变 `d`、`\n` 变真换行，正则静默失效）：页面表达式的正则写成 `[0-9]`、`[(]`、`[/]` 这种不带反斜杠的形式，或用 Write 工具把脚本写成文件再执行。
 52. **开了视口覆盖（`CDP_VIEWPORT=WxH@scale`）后，页面上报的 `devicePixelRatio` 会变**（如 `1600x1350@1` 在 1.2 缩放屏上读回 0.8）：rects 一律乘**页面当场读回的 dpr**，不要乘系统缩放；用完清掉覆盖并读回原值（如 `1600×789@1.2`）。
 53. **脚本自定位目录用 `fileURLToPath(import.meta.url)`**，不要 `new URL(import.meta.url).pathname`：后者不做 URL 解码，目录含中文 / 空格（需求目录必然含）时找不到同目录文件。2026-10-14 已修 `creativehub-drive.mjs`、`creativehub-gen-run.mjs`；各 AC 目录里复制出去的旧副本（如 AC-97 的 `rec7.mjs`）仍是旧写法。
-54. **`annotate-rects.py` 上下紧挨的两个框，上框的说明会压住下框的判定点**：拍到这种布局就去掉次要框、把说明写进图标题，出图后照常 Read 目检（§4.1）。
-55. 🔴 **后端没在监听时，Vite 代理返回空 body 的 500，页面显示成「No product found」「No data found!」**，像数据问题：每组开测前（和长流程每段开始前）先确认后端端口在监听（`curl -s -o /dev/null -w %{http_code} localhost:<后端端口>`，`000` = 没起），再跑 `chk401.mjs`。
+54. **`annotate.py --rects`（及其旧包装 `annotate-rects.py`）上下紧挨的两个框，上框的说明会压住下框的判定点**（坑 16b 的具体形态）：拍到这种布局就去掉次要框、把说明写进图标题，出图后照常 Read 目检（§4.1）。
+55. 🔴 **后端没在监听时，Vite 代理返回空 body 的 500，页面显示成「No product found」「No data found!」**，像数据问题：每组开测前（和长流程每段开始前）先确认后端端口在监听（`curl -s --noproxy '*' -o /dev/null -w %{http_code} localhost:<后端端口>`，`000` = 没起；不加 `--noproxy` 会走本机代理，见坑 48），再跑 `chk401.mjs`。
 56. 🔴 **调试端口连不上（`ECONNREFUSED 127.0.0.1:9222`）时，子 agent 不要自己拉 Chrome、不要接管现有 Chrome**：多半是电脑重启 / 测试实例被关；停下汇报，由主会话用**原独立 profile** 按 SKILL §1 重新拉起（登录态在 profile 里，通常不用重登），再把新 targetId 发给子 agent。旧 targetId 随实例重启全部失效。
+57. **窗口最小化时截图会隔一次挂一次**（最常见的一张等满约 10s 超时，会吃掉 8s 级的短任务窗口）。
+    结论先给足：**`conn.mjs` 的 `shot` 已经能正常出图，不需要你手动"踢醒"** —— 它的现成兜底恰好覆盖这条：
+    ① 单张上限 `min(SEND_TIMEOUT, 10000)` = 最多等 10s（不是 30s）；
+    ② 连续**直接截两次**（第二次本身就把挂起的那次踢活了，实测多数就在这里成功）；
+    ③ 两次都失败且窗口是最小化 → 临时恢复窗口 → 截图 → 缩回最小化；④ 仍失败才 `bringToFront` → 最后 screencast 取帧。
+    → 正常用法就是直接 `await c.shot(file)`，别的都不用做。只有实测**连续多张都挂**时才降级：
+      先发一次 600ms 短超时截图把窗口踢醒（`c.send("Page.captureScreenshot", {format:"png"}, 600).catch(()=>{})`），再正式截；
+      或者更省事：**别最小化，把窗口放到其他窗口后面**（坑 50：短任务进行中取证尤其别最小化）。
+    ⚠️ 2026-10-14 待确认：坑 50 实测「最小化 18/18 成功」与本条的「隔一次挂一次」边界不同（怀疑与短任务 / 任务进行中有关），
+       下次实机验证再测一轮；确定后考虑把「踢醒」做进 `conn.mjs` 的 `shot`（届时本节同步改）。
+58. **Windows 下按绝对路径 import skill 库要写成 `file:///C:/...`**，直接写 `C:/...` 或 `/c/...` 会被当成 URL scheme / 找不到模块。
+59. 🔴 **`vtable-scroll.mjs --max-rows` 曾形同虚设**（2026-10-14 离线回归实测）：上限只写在 `while` 条件里，首屏 `readOnce()` 可能一次就把 MAX 超掉（实测 `--max-rows 20` + 130 行一次渲染 → 返回 130 行、`truncated:false`）。已修：返回前 `slice(0, MAX)`，`truncated` 按原长度判断。**同类隐患自查**：凡「边收边判上限」的脚本，都要在**返回结果**上也截一次。
+60. **别用 node 的 `vm` 当"假浏览器"验证滚动类脚本**（2026-10-14 踩坑记录）：本机自建 CDP 测试台（`/json/list` + WebSocket + 最小 DOM）能可靠回归「等待语义 / 事件驱动 / 解析类」脚本，但**虚拟滚动逐屏路径测不了** —— `vm` 沙箱里给元素 `defineProperty` 的 `scrollTop` 与循环里的 `await` 组合会出现「第二拍读到的仍是上一拍的值」，于是 `if (sc.scrollTop === y) break` 提前触发，看起来像脚本 bug 其实是测试台假象。判据：**同一段循环在纯 Node 里跑 12 拍、在假页面里只跑 2 拍** ⇒ 怀疑测试台。滚动类改动仍以真机验证为准。
+61. **PowerShell 的 `Get-Content -Raw` / `Set-Content` 会把 UTF-8 中文文件改坏**（2026-10-14 本轮连踩两次）：`-replace` 后 `Set-Content` 默认按 ANSI 写回，中文变乱码（`ä¸æ–‡`），把脚本注释与字符串一起破坏。**改含中文的脚本一律用 Write / Edit 工具**；确要用 shell，显式 `-Encoding utf8` 且改完 `node --check` + 打开确认。（与坑 19a / 23 同源，但这条是"改坏已有文件"而非"转义丢失"。）
+
+### 2026-10-14 性能改造轮（等待语义 / 导出对账 / 一键证据）
+
+> 起因：全量审计发现真正的性能瓶颈不是 CDP 调用，而是「固定 sleep + 1s 粒度轮询 + 只看遮罩判加载完」——
+> 既慢，又会在「遮罩已消失、旧列表还在屏上」时给出错结论（PAGE-NOTES 的 Total 5116 vs 4145）。
+> 离线回归台（假 Chrome：`/json/list` + WebSocket + 最小 DOM + 可控慢请求）在 `.workbuddy/tmp/cdp-harness/`：
+> 本轮 6 个套件 90 例全绿；**虚拟滚动逐屏路径未离线覆盖**（见坑 60），真机回归时优先补测。
+
+- 新增 L0：`wait-settle.mjs`、`export-lib.mjs`、`verify-export.mjs`、`evidence.mjs`；`conn.mjs` 新增 `waitFor` / `evAll` / `settle`。
+- 新增 L1：`wait-lib.mjs`（本项目「等遮罩消失」的唯一写法）；9 个脚本改接它（ads-search / group-by / date-range / compare / sort-check / kpi-wait / drawer-from-ads / creativehub-fields-compare / creativehub-gen-run），
+  另 2 个改自适应粒度（creative-ads-setup.js / creativehub-ref-from-library.mjs）。
+- `wait-idle.mjs` 转为 `wait-settle.mjs` 的转发入口（旧命令与退出码不变，遵循「废弃不删名」）。
+- 顺带修掉的真 bug：`vtable-scroll.mjs --max-rows` 之前完全不生效（坑 59）。
 
 ## 维护规则
 
@@ -272,4 +309,8 @@ toast / 滑入动画要截图          → conn.mjs / sconn.mjs 的 snapSame（�
   `python ~/.claude/skills/distribute-agent-skills/scripts/distribute.py --skill cdp-drive-real-chrome --dry-run` 先看目标，再去掉 `--dry-run` 正式分发（逐文件 MD5 校验，看输出不看退出码，坑 19）
 - 页面改版 → 页面级选择器失效是正常的；**要更新「最后验证」日期并重跑一次**，别留过期结论
 - 新脚本进 L0 的门槛：至少在**两个不同需求**里用过
-- 合并 / 废弃脚本时**不删旧文件名**：留薄包装或转调（如 `annotate-rects.py` → `annotate.py --rects`、`compare-on.mjs` → `compare.mjs on`），文件头标 deprecated，避免外部文档里的旧命令失效
+- 🔴 **改 `conn.mjs` / 等待逻辑 / 解析类脚本后，跑 `tests/` 里的离线回归**（假 Chrome，不碰真浏览器，92 例）：
+  `cd tests && node run-tests.mjs && node run-wait-settle.mjs && node run-l1.mjs`（全量见 `tests/README.md`）。
+  测试台在 **skill 的 `tests/`**（资产，随 skill 分发），不是 `.workbuddy/tmp/` —— 它回归的正是 L0 脚本本身。
+- 合并 / 废弃脚本时**默认不删旧文件名**（与 [`self-review.md`](self-review.md) 红线「不为变短而删」一致）：`deprecated` 只表示「别再用」，文件名一律留薄包装或转调（如 `annotate-rects.py` → `annotate.py --rects`、`compare-on.mjs` → `compare.mjs on`），文件头标 deprecated，避免外部文档里的旧命令失效。
+  确实要删除时（如安全原因），先在 `REVIEW.md` 逐条写理由，并同步改掉所有引用它的文档、脚本注释与外部命令示例 —— **删之前先 grep 全仓引用**。

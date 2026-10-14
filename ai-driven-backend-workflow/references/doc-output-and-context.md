@@ -3,6 +3,12 @@
 ## 一、文档输出目录规范（CRITICAL）
 所有设计文档必须放入 `docs/develop/{Sprint}-{需求id}-{需求title}/`（后端仓），例：`26Q4-Sprint1-CP-58118-图片Creative生成 - 支持AI生成Hook 与Scene 2个独立信息`。
 
+> 🔴 **路径基准**：本文与各 step 里的相对路径（`docs/develop/...`、`scripts/...`、`docs/develop/tools/dashboard_server.py`）
+> **一律以后端仓根 `creative-management/` 为基准** —— 本工作区是多仓（`creative-management/`、`vuen-crossretail/`、
+> `platform-provider/`…），**同名 `docs/develop` 可能不止一棵**（实测外层根目录也长过一棵，需求目录建错地方）。
+> 动手前先确认：`Test-Path <后端仓根>\docs\develop`；不是就换仓根，别在当前目录新建一棵。
+> 看板服务、`validate_step.py --dir`、`qa_record.py --dir`、`init_workdir.py --project` 全部按这个基准给参数。
+
 ### 启动：用户给 Jira 号 → AI 自动建目录（禁止让用户手建）
 
 1. 用 Atlassian MCP `getJiraIssue`（`view: evidence`）取 `summary` 与 `Sprint` 字段
@@ -10,7 +16,7 @@
    - Sprint 字段为空、或 MCP 不可用 → 问用户 Sprint 名与标题，不要猜
 2. 跑脚本（同一票号已有目录就**复用**，不会建出「…信息」「…信息2」两份；命中多个时退出码 2，问用户用哪个）：
    ```bash
-   python scripts/init_workdir.py --project <后端仓根> --jira CP-xxxxx --sprint "<Jira Sprint 原值>" --title "<Jira summary 原文>"
+   py scripts/init_workdir.py --project <后端仓根> --jira CP-xxxxx --sprint "<Jira Sprint 原值>" --title "<Jira summary 原文>"
    ```
    - `Sprint`：取 Jira Sprint 名「 - 」之前那段（`26Q4-Sprint1 - Nova` → `26Q4-Sprint1`）
    - `需求title`：Jira summary 去掉开头的 `[Creative Hub] -` 这类标签、去除非法字符 `/\:*?"<>|`，超长截断
@@ -22,8 +28,9 @@ docs/develop/26Q4-Sprint1-CP-48771-share-audit/
 ├── Step 1-需求澄清问答记录.md            # Step1（含待 PM 确认清单）
 ├── Step 2-Spec.md                     # Step2
 ├── Step 3-Checklist.md                # Step3
+├── Step 3-Checklist-Jira.txt          # Step3 Jira 纯净版（checklist_jira.py 生成）
 ├── Step 4-技术设计与实现方案文档.md      # Step4
-├── Step 5-ddl.sql                     # Step5（含幂等）
+├── Step 5-ddl.sql                     # Step5（直接可执行的纯 SQL，见 step-05：不要用 PREPARE 包幂等）
 ├── Step 5-ddl-rollback.sql            # Step5 强制回滚
 ├── Step 5-data-backfill.sql           # Step5 数据回填（如涉及）
 ├── Step 6-API接口定义文档.md           # Step6
@@ -31,9 +38,16 @@ docs/develop/26Q4-Sprint1-CP-48771-share-audit/
 ├── Step 7-回归验证清单.md              # Step7（既有功能不被破坏，R-NN 编号）
 ├── Step 8-tasks.md                    # Step8
 ├── Step 10-业务逻辑自检报告.md          # Step10.3
+├── Step 10-浏览器验证步骤.md / Step 10-浏览器实机验证报告.md   # Step10.4（可选）
+├── Step 10-数据核对报告.md              # Step10.5（10.4 未执行时单独出；执行过则并入实机验证报告的 H 表）
 ├── Step 11-AI Review报告.md            # Step11
 ├── Step 12-全局一致性审查报告.md        # Step12
 ├── Step 12-{其他自动化报告名}.{ext}    # Step12 自动化检测产出（如有）
+├── Step 12-证据验收报告.md              # Step12 F（独立 subagent；复验轮次可另存 -第N轮.md 或 tests/_acceptance/）
+├── Step 12-测试交接文档.md              # Step12（test-handover.md）
+├── Step 13-AC-Subtask映射.md / Step 13-mapping.json   # Step13
+├── .workflow-state.json / .handover-state.json / .qa-changes.json   # 脚本维护的状态文件，不手改
+├── tests/                              # 每 AC 证据目录（见下）
 ├── 验证进度看板.html                   # Step10.4 收尾生成（用例状态 + 证据终验，可切换实时刷新，见下）
 └── UI/ (可选)                          # UI 截图
     └── asset-detail.png
@@ -59,7 +73,7 @@ docs/develop/{Sprint}-{需求id}-{需求title}/
     │   ├── REPLAY.md             # 【复跑入口 / Agent 实机验证轨】怎么再跑一遍 —— 命令 / SQL / 环境·账号·前置数据·编号操作步骤·预期 XHR
     │   ├── evidence/             # 【硬证据】当时的真实输出，与 REPLAY 的小节一一对应：截图 .png / 录屏 .mp4|.webm|.gif / 抓包 .har|.json / 查询结果 / 日志 .log
     │   ├── NOTES.md              # （可选）过程笔记：断言清单逐句打勾、「用时约 N 分钟」（verify_state.py backfill-duration 读它回填耗时）
-    │   └── RESULT.md             # 结论：通过/失败/阻塞/部分 + 环境 + 复跑入口 + 证据清单 + 本轮 marker 或 tabId，指向上面几者
+    │   └── RESULT.md             # 顶层第一条 `- 结论：<状态词>`（通过/失败/阻塞/部分/走读证据/跳过，与 verify_state 登记同词，门禁会比对）+ 环境 + 复跑入口 + 证据清单 + 本轮 marker 或 tabId，指向上面几者
     └── AC-02/
 ```
 
@@ -145,7 +159,7 @@ docs/develop/{Sprint}-{需求id}-{需求title}/
 - **拿不到录屏时的次优解**：别直接跳到日志。先用**关键帧连拍截图**——操作前 / 操作中（loading）/ 操作后各一张，
   按 `{AC-NN}-01-before.png`、`-02-loading.png`、`-03-after.png` 连号命名，在 `RESULT.md` 里按序说明。
   连拍序列的可信度接近录屏，远高于单张图
-- **一张图只说明一件事**：文件名要能独立读懂（`AC-07-02-share-dialog-email.png`），
+- **一张图只说明一件事**：文件名要能独立读懂（如 `AC-07-02-分享弹窗-邮箱渠道-标注.png`），
   不要用 `1.png` / `截图1.png`，也不要把五个结论挤进一张长截图
 
 > **为什么强调这个**：日志和抓包是"系统视角"，而验收要回答的是"**用户看到的对不对**"。
@@ -160,10 +174,13 @@ docs/develop/{Sprint}-{需求id}-{需求title}/
 
 1. **完整可执行的 SQL**，不是片段、不是伪代码。跨库时用**全限定表名**（`db.schema.table`），
    SQL Server 加 `WITH(NOLOCK)`；直接复制粘贴就能跑。
-2. **数据源标注**：哪个实例、哪个库、哪个环境（测试/预发）。
+2. **数据源标注**：哪个实例、哪个库、哪个环境（测试 / 预发 / 生产只读）。
 3. **口径出处**：SQL 照抄自哪个 mapper 的哪一段，标 `证据：<file>:<line>`。
    🔴 **禁止凭字段名自己编一条当基准** —— 动态 SQL 拼出来的和人肉照抄的经常不一样。
-4. **只读声明**：`⚠️ 只读 SELECT，禁止改写为写操作，禁止在生产库执行`。
+4. **只读声明**：`⚠️ 只读 SELECT，禁止改写为写操作`。
+   **生产库允许只读核对**（用户 2026-10-14 确认）：本机联调后端与 mysql MCP 连的就是生产 US，
+   所以「在生产库执行」本身不算违规 —— **违规的是写操作、查与本次 AC 无关的数据、无过滤条件扫大表**
+   （口径见 `data-reconciliation.md` §1 / §9）。
 5. 大表查询带 `profileId` / `advertiserId` + 有界日期区间（否则被只读门禁拒绝）。
 
 `evidence/` 对应放**实际返回**（一个 SQL 一个文件，文件名与 REPLAY 小节同名）：
@@ -236,11 +253,11 @@ docs/develop/<需求目录>/验证进度看板.html   # 单需求看板（含整
 docs/develop/index.html                     # 外层总览：所有进行中需求（排除 archived / tools），可切换查看
 ```
 
-- 生成（同时刷新外层总览）：`python scripts/verify_dashboard.py --dir docs/develop/<需求目录>`
-- 只重建外层总览：`python scripts/verify_dashboard.py --all --develop docs/develop`
+- 生成（同时刷新外层总览）：`py scripts/verify_dashboard.py --dir docs/develop/<需求目录>`
+- 只重建外层总览：`py scripts/verify_dashboard.py --all --develop docs/develop`
 - 直达某需求详情：`index.html#/<URL 编码后的需求目录>`（目录名含中文和空格，不编码链接点不开；可直接书签/分享）；详情页左上角「← 全部需求」返回总览
 - 🔴 **打开方式：一律服务模式**（与 SKILL.md 执行指令 1.5 同口径）：先探测 `http://127.0.0.1:8787/api/ping`，通 = 常驻服务已在；不通再起 `verify_dashboard.py --all --develop docs/develop --serve --port 8787`。服务模式下每次请求现场解析磁盘（内容实时）、「需求问答」页签可编辑保存、需求可归档。
-  `python -m http.server 8787 --directory docs/develop` 或 `file://` 双击**只作服务起不来时的只读降级**：**不能保存、不能归档**；只有用例状态 registry 每 5s 轮询 `tests/.verify-state.json` 实时刷新，证据清单 / Checklist / 流程步骤 / 回归项是生成时快照；`file://` 下浏览器还会拦截本地 fetch，整页降级为「生成时快照」并提示横幅。
+  `py -m http.server 8787 --directory docs/develop` 或 `file://` 双击**只作服务起不来时的只读降级**：**不能保存、不能归档**；只有用例状态 registry 每 5s 轮询 `tests/.verify-state.json` 实时刷新，证据清单 / Checklist / 流程步骤 / 回归项是生成时快照；`file://` 下浏览器还会拦截本地 fetch，整页降级为「生成时快照」并提示横幅。
 - 🔴 **刷新时机**：`verify_state.py` 的 `claim` / `fix` / `finish` / `final` / `reclaim` / `invalidate` 等登记成功后**自动**重跑生成器（加 `--no-dashboard` 才跳过，禁止为省时间跳过）；`validate_step.py --record` 也会顺带重建。不走登记的手工改动（如直接改 `RESULT.md`）改完手动跑一次 `verify_dashboard.py --dir <需求目录>`。
 - 🔴 **看板是辅助产物，不是门禁**：缺失或过旧只提示，不判 FAIL，不改变任何交付结论。
 - 证据**弹窗内联预览**：图片 / 视频直接看，`.md`（RESULT.md / REPLAY.md / case.md）与 `.json` / `.har` / `.log` / `.txt` / `.csv` 内联渲染成文本；Excel 等二进制回退「新标签打开 ↗」。`file://` 下浏览器禁止本地 fetch，文本预览不可用（会有提示），用 http 打开即可。
@@ -248,7 +265,9 @@ docs/develop/index.html                     # 外层总览：所有进行中需�
 - 数据源（全部可选，缺失即降级）：`tests/.verify-state.json`、`.workflow-state.json`、`Step 3-Checklist.md`、`tests/AC-NN/`（case.md / REPLAY.md 或 script/ / evidence/ / RESULT.md）、`Step *-回归验证清单.md`。
 
 ## 二、项目上下文适配
-本仓库为 Spring Boot 微服务(micro-api/micro-model/micro-common-db/micro-feign)。
+本仓库为 Spring Boot 微服务（模块以仓根 `pom.xml` 的 `<module>` 为准，别背名字）：
+`creative-management-api` / `creative-management-base` / `creative-management-model` / `creative-management-feign`；
+依赖方向 api → base → model。
 
 额外遵循：
 - 数据库 → `.agents/database.md`(MyBatis/事务)
@@ -261,8 +280,8 @@ docs/develop/index.html                     # 外层总览：所有进行中需�
 ## 三、执行检查清单（AI 自检）
 每步完成后自检：
 - [ ] 产出物已落地为文件？设计文档在统一目录下？
-- [ ] 严格使用了上一步产出物作为输入？已汇报路径并暂停 review？未获确认不进入下一步？
-- [ ] Step1 覆盖 6 个维度提问？Step2 Spec 无技术细节并采用 proposal 模板？
+- [ ] 严格使用了上一步产出物作为输入？`validate_step.py --step N --record` 已 PASS？🔴 阻塞档已暂停并拿到用户明确确认、🟡 通知档已一句话汇报（门控档位见 SKILL.md）？
+- [ ] Step1 覆盖 7 个维度提问（功能边界 / 异常场景 / 数据来源 / 前后端交互 / 权限角色 / 非功能 / 影响范围）？Step2 Spec 无技术细节并采用 proposal 模板？
 - [ ] **零臆测**：本步所有事实性判断都有取证（`file:line` / 文档出处）或已列入提问？有没有靠"通常/应该是/按惯例"填的空？（全程适用，非仅 Step1）
 - [ ] **影响面**：同类场景扫过六类了吗（读取口径/其他入口/其他平台/读写两侧/枚举副本/其他 Mapper XML）？Step4 影响面清单每项都判定了"需改/不需改+理由"？"需改"项都有对应 `AC-NN`？（全程适用）
 - [ ] **全局落点**：改动落在正确的层了吗（同类点 ≥2 处应上提共享层，=1 处就地改）？上提的改动有没有重新扫一遍该层其他调用方？有没有就地打补丁 / 新增并行副本？
@@ -277,11 +296,11 @@ docs/develop/index.html                     # 外层总览：所有进行中需�
 - [ ] **测试用例质量**：每条用例只验证**一个**测试点（没把多场景合并）？每个分支标了 `P0/P1/P2`？矩阵逐条完整、**没有出现「其余同理」「…（略）」这类省略**？
 - [ ] **矩阵自评**：落盘前过了覆盖率/逻辑性/规范性三维？6 条判定项（无前置条件、模糊预期、缺业务约束分支、一条多测试点、未标优先级、折叠省略）全部不命中？自评表附在矩阵末尾、问题精确到 `AC-NN`+分支号？
 - [ ] Step9 强制复用既有点（未重复造轮子）？逐条落地非功能需求映射表代码落点？
-- [ ] Step9/10 全程未 git add/commit？
+- [ ] Step9/10/11 全程未 git add/commit？
 - [ ] Step10 业务代码完成后才写单测(10.1) → 编译自愈(10.2) → 逻辑自检(10.3) →（可选）浏览器实机验证(10.4：先出《浏览器验证步骤》并获授权，再开浏览器抓 XHR 取证)？自检报告全部 ✅？
-- [ ] Step11 已执行四维审查？修复是否触发变更影响重新评估（已处理）？
-- [ ] Step12 已执行五维一致性审查？A~E 是否全部 ✅ 或 ⚠️ 已修复？
-- [ ] Step12 结论为 PASS？提交只 add 相关文件、禁 git add .、Conventional Commits、推 feature 分支？DDL 已提醒手动执行？
+- [ ] Step11 已执行合规 A~D（含 lessons 合规）+ 缺陷猎捕 E？修复是否触发变更影响重新评估（已处理）？
+- [ ] Step12 已执行 A~E 一致性审查 + F 证据验收（独立 subagent）？A~E 是否全部 ✅ 或 ⚠️ 已修复？`validate_step.py --workflow backend --step 12` 的前序步骤复检 / 用例状态 vs RESULT / 回归清单汇总 / 交接文档时效 / tasks 全部勾选（含回归任务组）均已通过？
+- [ ] Step12 结论为 PASS？提交只 add 相关文件、禁 git add .、按所在仓 commit 规范（本工作区 `feat:CP-xxxxx 描述`）、推 feature 分支？DDL 已提醒手动执行？
 - [ ] 各步由脚本产出的自动化报告已复制到 docs 目录并加 Step N- 前缀？
 - [ ] 测试证据按 AC 归档了？`docs/develop/{...}/tests/AC-NN/` 下 `case.md` + （`script/` **或** `REPLAY.md`）+ `evidence/` + `RESULT.md` 齐全，且 `tests/README.md` 索引与之一致？**缺证据的 AC 视为未测**。
 - [ ] 执行了 10.4 时：进场检查四项已过（含登录态确认）并记入 `tests/README.md`？逐 AC 一闭环取证（非事后补证、记了 marker）？报告 E 表写明脏数据是否已清理与责任人？F 表 `git status` 确认无残留调试代码？并行了多个会话时：`tests/.verify-state.json` 与实际一致（无僵尸「验证中」）、每条 AC 的窗口标识互不重叠？

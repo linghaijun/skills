@@ -6,6 +6,9 @@ agent_created: true
 
 # 用真实 Chrome + CDP 驱动浏览器
 
+> 🗓 **定期自检**：本 skill 每 7 天 review 一次，记录在同目录 `REVIEW.md`（开头「上次 review：日期」）。使用时若已到期 **且（本 skill 被改动过、或本次有坑 / 脚本待沉淀）**，**主任务收尾后**按 [`references/self-review.md`](references/self-review.md) 做一次并在回复里说明。
+> 纯只读任务、skill 也没动过 → 只抽查本次碰到的文件 + 在 `REVIEW.md` 刷新日期即可，**不必重读全部文件**（避免自检成本超过主任务）。
+
 ## 何时用
 
 - 任务需要「先让人类登录，再由 Agent 操作页面」（agent-browser 默认起的是 **headless**，用户看不到、登不了）。
@@ -20,7 +23,7 @@ agent_created: true
 
 **这个 skill 已有成套脚本，不要现写。** 每次操作浏览器前按序打开：
 
-1. [`references/SCRIPTS.md`](references/SCRIPTS.md) — **脚本表 + 选型决策树 + 坑清单的唯一权威**（三种真点击怎么选也在这里）
+1. [`references/SCRIPTS.md`](references/SCRIPTS.md) — **脚本表 + 选型决策树 + 坑清单的唯一权威**（三种真点击怎么选、等待该用哪个也在这里）
 2. [`projects/<项目>/README.md`](projects/creative-management/README.md)（本仓常用 creative-management）— **L1 页面级**脚本怎么用、配方；
    同目录 [`PAGE-NOTES.md`](projects/creative-management/PAGE-NOTES.md) — 该项目页面的**事实、口径、测试账号与坑**（不进项目 git）
 3. 要并行 / 多账号 → [`references/PARALLEL.md`](references/PARALLEL.md)（原本文 §2.5 / §2.6 全文）
@@ -28,6 +31,12 @@ agent_created: true
 
 全栈 / 后端 workflow 的 playbook Step0 已强制同一顺序；**用户不必每次口头提醒**。
 工作流里登记窗口用的 `verify_state.py` 不在本 skill，在 `ai-driven-fullstack-workflow/scripts/`。
+
+**执行位置**：上面这些命令一律以**本 skill 目录**为工作目录（先 `cd` 进去，或整条写绝对路径）。
+`references/` 里看到 `node scripts/xxx.mjs`、`node tab-open.mjs` 两种写法，说的都是**同一个位置**，不是相对于你当前的项目仓。
+
+**术语边界**：本页 / `references/` 里出现的「playbook §2.2 / §4.0 / §4.1 / §4.2 / §10 / §12」与验收判据「C2」，都出自 `ai-driven-fullstack-workflow` 的 `references/browser-playbook-*.md`。
+装了那个 skill 就按它执行；**没装也不影响本 skill** —— 照抄本 skill 的做法即可（例如「框边必须写字」本身就是红线，不必先去查 §4.1）。
 
 一句话判据：**写脚本前先问「下次换个需求，这个脚本还能直接跑吗？」**
 能 → L0 `scripts/`；不能但同页面复用 → L1 `projects/<项目>/`；只用一次 → `.workbuddy/tmp/` 且不提交。
@@ -43,15 +52,17 @@ agent_created: true
 - 🔴 **先判定实例**：看 `--user-data-dir` 实参，不凭端口号；无该参数 / 指向 `Google\Chrome\User Data` = 用户日常浏览器 → 停，另开（§2.4，坑 0）
 - 🔴 **先确认页面背后是哪个后端**，数据指纹比一遍再取证，否则测的不是本机（坑 1）
 - 🔴 **开测先跑 `chk401.mjs`**：登录态过期页面照常渲染空壳，退出码非 0 立即停、交给用户登录（坑 36）
+- 🔴 **先确认后端端口在监听**：后端没起时 Vite 代理回空 500，页面显示「No data found」像数据问题（坑 55）
 - agent-browser `--headed` 实际仍是 headless；daemon 随前台调用被回收；PowerShell 里跑它会静默终止；curl 本机要 `--noproxy '*'`（坑 45~48）
 
 **连接与并行**
 - 🔴 **并行一律锁窗口**：每组 `CDP_TARGET=<targetId>`（`tab-open.mjs --open` 拿 id），不用 `--index`；同实例标签共享 cookie + localStorage（坑 30，[PARALLEL §2.6](references/PARALLEL.md)）
 - 🔴 **写偏好 / 写数据 / 前后依赖的 AC 不并行**；并发窗口 ≤ 4；能独立的组尽量派子 agent（[PARALLEL §2.6](references/PARALLEL.md)）；**单个 AC / 几步就完的操作自己做**（派子 agent 要重讲上下文、另开窗口，小活反而更慢）
 - 🔴 **子 agent 连接一律 `sconn.mjs`**（所有 CDP 调用 ≤30s + 兜底），不得自写无超时客户端；brief 必含 targetId / 禁改偏好清单 / chk401（坑 35、32，[PARALLEL §2.6](references/PARALLEL.md)）
-- 🔴 **多步脚本只用 `conn.mjs` / `sconn.mjs`**，别再抄 CDP 客户端（超时不 `unref` 会白等，坑 21）
+- 🔴 **9222 连不上（ECONNREFUSED）→ 子 agent 停下汇报**，不自拉 / 不接管 Chrome；主会话用原 profile 重拉后发新 targetId（坑 56）
+- 🔴 **多步脚本只用 `conn.mjs` / `sconn.mjs`**，别再抄 CDP 客户端（超时不 `unref` 会白等，坑 21）；Windows 按绝对路径 import 写 `file:///C:/…`（坑 58）
 - 🔴 **焦点模拟必须同一条连接**，否则后台标签被节流、页面里 sleep 像卡死（坑 3）
-- 🔴 **不抢前台**：启动带 4 个防后台参数后被挡住也能截图 / 点击；`bringToFront` 只在截图失败时兜底；最小化也先直接截，偶发失败才恢复窗口；**禁用 `fromSurface:false`（返回白图）**（坑 50）
+- 🔴 **不抢前台**：启动带 4 个防后台参数后被挡住也能截图 / 点击；`bringToFront` 只在截图失败时兜底；截图直接 `await c.shot(f)` 即可（内部已连截两次 + 最小化时临时恢复兜底，坑 57）；短任务中取证优先别最小化（隔次挂起，坑 57）；**禁用 `fromSurface:false`（返回白图）**（坑 50）
 
 **操作**
 - 🔴 **`el.click()` 常静默无效** → 真鼠标事件（`real-click.mjs` / `cdp.mjs --realclick` / `click-js.mjs`）；点前打印 `elementFromPoint` 命中链（坑 4、43）
@@ -59,19 +70,20 @@ agent_created: true
 - 🔴 **多选页签是累加器 → 先 reload 复位；改页签后必须再点 Search**（坑 6、7、8）
 - 同名 id 多份、工具栏横向溢出、`innerText` 读到隐藏元素、PacvueSelect DOM 0 命中 ≠ 没选项、AX 快照里收起的弹层照收（坑 39~44）
 - 🔴 **「删 localStorage → reload」不是首次进入** → `fresh-entry.mjs`（坑 24）
-- 🔴 **视口覆盖不会随连接撤销**；宽视口下弹出层坐标算错 → 操作在正常视口、截图再切宽（坑 25、26）
-- 🔴 **页面代码放独立 `.js` 原样注入**（模板字符串吞反斜杠）；含 `\\` 的文件用 Write / Edit 写，别走 shell（坑 22、23）
+- 🔴 **视口覆盖不会随连接撤销**；宽视口下弹出层坐标算错 → 操作在正常视口、截图再切宽（坑 25、26）；开了视口覆盖后 rects 乘页面当场读回的 dpr（坑 52）
+- 🔴 **页面代码放独立 `.js` 原样注入**（模板字符串吞反斜杠）；含 `\` 的脚本内容用 Write / Edit 工具写，别走 shell（heredoc / `sed` 会把 `\\` 折叠成 `\`）；heredoc 里的页面正则改用 `[0-9]` 这类不带反斜杠写法（坑 22、23、51）
 
 **读数**
-- 🔴 **必须能区分 `null` 与 `0`**：`--` 可能是门禁也可能是 null，读数据层 `vue-datalayer-read.js`，按分组键看三态（坑 10）
-- 🔴 **固定列与主体区是两套 DOM** → 几何归位 `vtable-read.js`；虚拟滚动只渲染可见行 → `vtable-scroll.mjs`（坑 9、11、12）
+- 🔴 **`--` 可能是门禁也可能是 null**：读数据层 `vue-datalayer-read.js`，**必须能区分 `null` 与 `0`**（坑 10）
+- 🔴 **固定列与主体区是两套 DOM** → 几何归位 `vtable-read.js`；虚拟滚动只渲染可见行 → `vtable-scroll.mjs`（坑 9、11、12；`--max-rows` 上限已修，坑 59）
 - 🔴 **列表 20~42s**：判「没数据」看 XHR 响应体，不看 DOM；loading 中不读不截（坑 2、16a）
+- 🔴 **别用 `sleep` 猜时长**：布景 / 切日期 / 点 Search 之后用 `wait-settle.mjs`（网络静默 + DOM 静默 + 遮罩消失 + 可选行数稳定）；等某条件用 `c.waitFor(expr,{until})`，一次读多个值用 `c.evAll([...])`；L1 里等遮罩统一用 `projects/creative-management/wait-lib.mjs`（超时会报错，不再静默跑满然后继续）
 
 **证据**
-- 🔴 **几何从页面导出、截图前后各导一次 rects 且 `cmp` 一致**；瞬态元素先 `waitStable`（坑 14、15、16e）
-- 🔴 **标注框边必须写字**（`annotate.py --rects`；`annotate-legend.py` 不合验收）；不用黑 / 深灰；出图后打开看（坑 16b、16c、16g）
+- 🔴 **几何从页面导出、截图前后各导一次 rects 且 `cmp` 一致**；瞬态元素先 `waitStable`（坑 14、15、16e）→ 现在一条命令即可：**`evidence.mjs`**（布景 → 同帧截图+导几何 → 框边写字 → 证据 JSON）
+- 🔴 **标注框边必须写字**（`annotate.py --rects`；`annotate-legend.py` 不合验收）；不用黑 / 深灰；出图后打开看，上下紧挨的框说明会互压（坑 16b、16c、16g、54）
 - 🔴 **录屏帧按画面内容选，不按时间戳**（坑 16f）；构造证据只走 `fetch-stub.mjs` 并标「构造」（坑 38）
-- 🔴 **导出 / 写操作 / 点 Generate 需用户本轮授权**；导出用 `export-target.mjs`（`export-click.mjs` 已 deprecated）
+- 🔴 **导出 / 写操作 / 点 Generate 需用户本轮授权**；导出用 `export-target.mjs`（`export-click.mjs` 已 deprecated），**内容对账用 `verify-export.mjs`**（文件行数/表头 ↔ 页面 Total；`No data found` 判失败）
 - 🔴 **默认不恢复浏览器现场**（用户约定），只有用户要求才 `storage-restore.mjs`（坑 31）
 - 🔴 **取证请求的令牌不经过 Node**、请求头不落盘不打印（坑 49）
 
@@ -142,6 +154,7 @@ CHROME="/c/Program Files/Google/Chrome/Application/chrome.exe"
 sleep 15
 ```
 
+- **另开**命令给的是 `cdp-profile-<用途>`；遇到旧名 `cdp-chrome-profile` 等专用目录**一样算"可复用"**（都是给测试用的独立 profile，不要因为它不叫 `cdp-profile-*` 就重开一个）
 - 端口选 **92xx 且避开已在用的**（9222/9223 常被长期实例占着）
 - profile 目录名**带上用途**（`-admin` / `-viewer` / `-cp57189`），便于事后分辨是谁
 - 新实例**登录态是空的** → 需用户手动登一次；**能用现成登录态就别另开**
@@ -194,7 +207,7 @@ node cdp.mjs --list               # 列出 page target（含 targetId）
 没有这一步，本次写的脚本就烂在 `tmp/`，踩过的坑下次还会再踩。逐项过一遍：
 
 1. **过脚本**：列出本次在 `tmp/` 新写或改过的脚本，逐个按分层判据定去向 ——「下次换个需求还能直接跑」→ 升 L0 `scripts/`；「同页面能复用」→ 升 L1 `projects/<项目>/`；只对这次有效 → 留 `tmp/`。
-   升级时必须：文件头写用途 + 用法示例；登记到 `references/SCRIPTS.md`（L0）或 `projects/<项目>/README.md`（L1）；写「最后验证」日期；连接一律用 `conn.mjs` / `sconn.mjs`。
+   升级时必须：文件头写用途 + 用法示例；登记到 `references/SCRIPTS.md`（L0）或 `projects/<项目>/README.md`（L1）；写「最后验证」日期；连接一律用 `conn.mjs` / `sconn.mjs`；自定位目录用 `fileURLToPath(import.meta.url)`（坑 53）。
    同一手法在不同需求里第 2 次手写 = 该升 L0 的信号（「≥2 次」靠这次回看历史 tmp / README 判断，不靠记忆）。
 2. **过坑**：本次排查超过约 10 分钟、或让结论差点出错的问题，写成坑 —— 跨项目通用 → `SCRIPTS.md` 坑清单（新编号接在末尾，不改旧号）；只和这个项目 / 页面有关 → `PAGE-NOTES.md`。
    写之前先查重：已有同类就并入那一条、补一句「实测：…」，不新开。

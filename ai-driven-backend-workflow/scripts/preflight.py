@@ -5,9 +5,9 @@
 产出全部作废。本脚本在 Step 1 之前跑一次，把「撞上才知道」的坑提前暴露。
 
 用法:
-    python preflight.py                    # 全量检查
-    python preflight.py --skip db,browser  # 跳过某些组
-    python preflight.py --json             # 机器可读输出
+    py preflight.py                    # 全量检查
+    py preflight.py --skip db,browser  # 跳过某些组
+    py preflight.py --json             # 机器可读输出
 
 退出码: 0=可以开工; 1=有 BLOCK 项，必须先修
 WARN 项不阻塞，但会打印出来，Agent 应在 Spec 里记一笔。
@@ -90,7 +90,33 @@ def check_node() -> None:
 
 
 def check_python() -> None:
-    record("toolchain", "python", OK, sys.version.split()[0])
+    """解释器可用性：**真的跑一遍文档会用的调用形式**。
+
+    Windows 商店版 `python.exe` 是个假别名：`shutil.which` 找得到、执行却直接失败
+    （2026-10-14 实测本机 `python -V` → "Program 'python.exe' failed to run"）。
+    旧实现只 record 了"正在跑这个脚本的解释器"版本 → preflight 报绿，而照文档敲的每条
+    命令都失败，且 compact hook 是静默失败的（文档命令与 hook 都写 `python ...`）。
+    所以这里逐个真跑 python / python3 / py，并对比文档实际写的是哪个。
+    """
+    record("toolchain", "当前解释器", OK, f"{sys.executable} ({sys.version.split()[0]})")
+    usable, broken = [], []
+    for cmd in ("python", "python3", "py"):
+        exe = shutil.which(cmd)
+        if not exe:
+            continue
+        code, out = _run([exe, "-V"], timeout=20)
+        (usable if (code == 0 and out) else broken).append(cmd)
+    if not usable:
+        record("toolchain", "文档命令用的解释器", BLOCK,
+               f"python / python3 / py 都跑不起来（{broken}），但文档命令与 hook 都写 `python scripts/...`："
+               "先修 PATH，再开工")
+    elif "python" in usable:
+        record("toolchain", "文档命令用的解释器", OK,
+               "python → " + _run([shutil.which("python"), "-V"])[1].splitlines()[0])
+    else:
+        record("toolchain", "文档命令用的解释器", WARN,
+               f"`python` 在本机跑不起来（{broken or '未安装'}），可用的是 {' / '.join(usable)} —— "
+               f"文档示例与 hook 里的解释器要用 `{usable[0]}`，否则每条命令都失败、且 hook 静默失效")
     # Windows 控制台默认 cp1252，打印中文会 UnicodeEncodeError
     enc = (sys.stdout.encoding or "").lower()
     if os.name == "nt" and enc not in ("utf-8", "utf8"):
@@ -117,9 +143,20 @@ def check_repos(project: Path) -> None:
 
 
 def check_docs_dir(project: Path) -> None:
+    """在**已存在**的 docs/develop 上做写探针。
+
+    原来无条件 `mkdir(parents=True)`：从错的仓根跑（`--project` 默认 `.`）会凭空建出一棵
+    `docs/develop`，之后需求目录就建在那里 —— 本机实测同一个工作区出现过两棵 docs/develop。
+    目录不存在时不再是「创建」，而是提醒确认 `--project` 指向的是不是后端仓根；
+    真正创建需求目录是拿到 Jira 号后 `init_workdir.py` 的事。
+    """
     d = project / "docs" / "develop"
+    if not d.is_dir():
+        record("docs", "docs/develop", WARN,
+               f"{d} 不存在 —— 确认 --project 是否指向后端仓根；"
+               "preflight 不再代建（免得建在错的仓），拿到 Jira 号后由 init_workdir.py 创建")
+        return
     try:
-        d.mkdir(parents=True, exist_ok=True)
         probe = d / ".preflight-write-test"
         probe.write_text("ok", encoding="utf-8")
         probe.unlink()

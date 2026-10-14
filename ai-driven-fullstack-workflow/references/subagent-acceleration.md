@@ -26,7 +26,7 @@
 | 测试 / 编译自愈 | 大段日志、surefire 报告的定位分析（只读） | 1–2 | 修复由主 agent 或单一写者执行，避免两处同时改 |
 | 浏览器实机验证 | 按 AC 组并行，每组一个窗口 | 见 `browser-playbook-parallel.md` §11/§12 | 🔴 并行规则（锁窗口、`verify_state.py` 认领、写操作单独授权）全文以 parallel 文件为准 |
 | 数据核对（只读 SQL） | 按 AC 组并行写 / 跑对账 SQL | **重查询同时 ≤2** | 慢查询会拖垮共享 MCP 服务；全程只读，见 `data-reconciliation.md` |
-| AI Review | 合规五维 / 缺陷猎捕 / lessons 合规 按维度拆给不同子 agent | 2–4 | 子 agent 发现的问题**主 agent 逐条复核**后才写进报告，误报直接剔除 |
+| AI Review | 合规各维 / 缺陷猎捕 / lessons 合规 按维度拆给不同子 agent | 2–4 | 子 agent 发现的问题**主 agent 逐条复核**后才写进报告，误报直接剔除 |
 | 全局一致性审查 | 证据验收**必须**由独立子 agent 盲审（见 `evidence-acceptance.md`）；跨文档一致性可按文档对拆 | 按 AC 量 | 证据验收子 agent 不能是做验证的那个 |
 | 经验沉淀 | 一般不派 —— 量小，且要用户确认 | — | — |
 
@@ -55,4 +55,5 @@
 - 子 agent 的报告是**线索不是证据**：写进任何交付物前，主 agent 至少抽检关键结论（打开它给的 `file:line` 看一眼），这同样适用原则「零臆测」
 - 写代码的子 agent 收工后，主 agent 看 diff、跑编译 / `validate_step.py`，不能只看它的「已完成」
 - 两个子 agent 结论冲突 → 主 agent 取证裁决，不取平均
+- 🔴 **收到汇报的同一轮由主 agent 回写所有记录处**（verify_state 状态、RESULT 结论、回归清单行与汇总、tasks 勾选、交接文档）—— 子 agent 通常不动这些，主 agent 不回写就没人回写，见 `browser-playbook-parallel.md` §12.7
 - 在本步产出物或汇报里注明「哪些部分由子 agent 产出、已抽检哪些」

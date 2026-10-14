@@ -18,6 +18,12 @@ window.__ann = function (items, opts) {
     const r = el.getBoundingClientRect();
     return Object.assign({}, it, { x: r.left + sx - 4, y: r.top + sy - 4, w: r.width + 8, h: r.height + 8 });
   }).filter(Boolean);
+  // 全部选择器落空时必须显式报错：以前返回 {top: Infinity} 交给调用方裁剪，
+  // 结果是截图脚本崩在一个看不懂的地方，或者裁出一张空图当证据（未标注的截图不算证据）。
+  if (!boxes.length) {
+    const miss = (items || []).map(it => it.sel || (it.el && it.el.tagName) || '(未给选择器)');
+    throw new Error('__ann: 没有命中任何元素，无法出标注图。检查选择器 / 等页面加载完 / 元素在视口内：' + JSON.stringify(miss));
+  }
   boxes.forEach(b => {
     const rect = document.createElementNS(svgNS, 'rect');
     rect.setAttribute('x', b.x); rect.setAttribute('y', b.y);

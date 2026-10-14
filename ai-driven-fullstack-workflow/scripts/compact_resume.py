@@ -11,9 +11,11 @@
 2. 对最近的 1~2 个需求跑 validate_step.py --status 拿续跑点
 3. 打印：看板链接（目录名已 URL 编码）+ 续跑点 + 压缩后必做的三件事
 
-用法（.claude/settings.json）：
+用法（.claude/settings.json）：解释器写**本机真能跑的那个** —— Windows 商店版 `python.exe`
+是假别名（找得到、跑不起来），而本脚本出错静默退出，于是续跑提示永远不出现。
+先 `py -V` 试：能用就写 `py`，其他平台写 `python3` / `python`。
   "hooks": {"SessionStart": [{"matcher": "compact", "hooks": [{"type": "command",
-      "command": "python \"$HOME/.claude/skills/ai-driven-fullstack-workflow/scripts/compact_resume.py\""}]}]}
+      "command": "py \"C:/Users/<you>/.claude/skills/ai-driven-fullstack-workflow/scripts/compact_resume.py\""}]}]}
 其他 agent 工具没有 /compact 与 SessionStart(compact)，不用配置，也不需要这个脚本。
 """
 

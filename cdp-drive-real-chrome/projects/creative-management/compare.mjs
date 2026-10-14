@@ -13,6 +13,7 @@
 // 🔴 Compare 复选框 / 对比区在 2560 视口下宽度为 0（面板底栏被收起）→ 开 / 关 / 自定义对比都用 CDP_VIEWPORT=wide
 // 🔴 宽视口下别的弹出层（Group by 下拉）坐标会算错 —— 只在这里用宽视口，切分组回正常视口（README「本页实测的坑」5）
 import { connect } from "../../scripts/conn.mjs"; import fs from "node:fs";
+import { makeBusyGone, waitBusyGone } from "./wait-lib.mjs";
 
 const argv = process.argv.slice(2);
 const mode = argv[0];
@@ -23,7 +24,12 @@ if (!["on", "off", "custom"].includes(mode)) { console.error('usage: node compar
 const c = await connect();
 const MASK = `[...document.querySelectorAll(".el-loading-mask,.pacvue-loading-mask")].some(e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0&&getComputedStyle(e).display!=="none"`;
 const busy = (skipOverlay = true) => c.ev(MASK + (skipOverlay ? `&&!e.closest('.el-dialog,.el-drawer')` : "") + "})");
-const waitIdle = async (skipOverlay) => { for (let k = 0; k < 180; k++) { await c.sleep(1000); if (!(await busy(skipOverlay)) && k > 3) break; } };
+// 原 waitIdle 是 180×1s 固定粒度；现在统一走 wait-lib（自适应轮询 + 超时抛错）
+const busyGoneSkip = makeBusyGone(c, { key: "__cmpTick" });
+const busyGoneAll = makeBusyGone(c, { overlay: true, key: "__cmpTickAll" });
+const waitIdle = async (skipOverlay, minTicks = 4) => (skipOverlay
+  ? waitBusyGone(c, busyGoneSkip, { minTicks, label: "compare-skipOverlay" })
+  : waitBusyGone(c, busyGoneAll, { minTicks, label: "compare-overlay" }));
 const CB = `[...document.querySelectorAll('.cus_checkout')].find(e=>e.getBoundingClientRect().width>0 && e.textContent.trim()==='Compare')`;
 const openPanel = async () => {
   await c.ev("window.scrollTo(0,0)");

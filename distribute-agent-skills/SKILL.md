@@ -1,6 +1,6 @@
 ---
 name: "distribute-agent-skills"
-description: "把本机源 skills 目录（~/.claude/skills）里改好的 skill 分发到其他 agent 工具的 skills 目录（Cursor / Trae / opencode / kimchi 等），只覆盖不删除、逐文件 MD5 校验、先 --dry-run 看目标。改完任何 skill 并自检通过后使用。触发词：分发 skill、同步 skill、skill 改完了、distribute、把 skill 推到其他 agent、其他工具看不到新 skill。"
+description: "把本机源 skills 目录（~/.claude/skills）里改好的 skill 分发到其他 agent 工具的 skills 目录（Cursor / Trae / opencode / kimchi 等），默认只覆盖不删除（源里删掉的文件看过残留清单后用 --prune 清理）、逐文件 MD5 校验、先 --dry-run 看目标。改完任何 skill 并自检通过后使用。触发词：分发 skill、同步 skill、skill 改完了、distribute、把 skill 推到其他 agent、其他工具看不到新 skill。"
 ---
 
 # Skill 分发（distribute-agent-skills）
@@ -27,7 +27,7 @@ python scripts/distribute.py --dry-run     # ① 先看目标列表，确认数�
 python scripts/distribute.py               # ② 正式分发，逐文件 MD5 校验
 ```
 
-分发别的 skill（默认分发两个 workflow + `cdp-drive-real-chrome` + `debugging-systematic-jira` + 本 skill 自身，自身放最后）：
+分发别的 skill（默认分发两个 workflow + `cdp-drive-real-chrome` + `debugging-systematic-jira` + `pm-sprint-update-jira` + 本 skill 自身，自身放最后）：
 
 ```bash
 python scripts/distribute.py --skill pacvue-common-utils --skill creativehub-integrating-migration-platform --dry-run
@@ -35,12 +35,13 @@ python scripts/distribute.py --skill pacvue-common-utils --skill creativehub-int
 
 | 参数 | 作用 |
 |---|---|
-| `--skill NAME` | 要分发的 skill，可多次；不传则用默认组（两个 workflow + `cdp-drive-real-chrome` + `debugging-systematic-jira` + `distribute-agent-skills`） |
+| `--skill NAME` | 要分发的 skill，可多次；不传则用默认组（两个 workflow + `cdp-drive-real-chrome` + `debugging-systematic-jira` + `pm-sprint-update-jira` + `distribute-agent-skills`） |
 | `--dry-run` | 只列目标和「被别处改过」的冲突，不复制。**第一次跑、或改过排除规则后，必须先跑这个** |
 | `--force` | 目标在上次分发后被别处改过也照样覆盖（**先确认那些改动不要了**；新增文件仍不删） |
 | `--src DIR` | 源 skills 目录，默认本脚本所在 skill 的上级目录（即 `~/.claude/skills`） |
 | `--home DIR` | 搜索根目录，默认用户目录 |
 | `--exclude GLOB` | 额外排除的目标目录 glob，可多次 |
+| `--prune` | 复制全部成功（MD5 0 不一致）后删除残留文件与清空的目录。**先不带它跑一次看残留清单，确认后再加**（见下方「残留看过清单再清理」） |
 | `--include-repos` | 连 `IdeaProjects/` 下各仓库内的 skill 副本一起更新（见下方红线） |
 | `--include-skills-repo` / `--no-include-skills-repo` | **默认开**：同步 `IdeaProjects/skills` 本仓库；关掉用 `--no-include-skills-repo`（`skills - Copy` 等备份始终排除） |
 | `--commit-skills-repo` | 分发后在 `IdeaProjects/skills` 里**本地 commit** 本次分发的 skill 目录（只提交这些路径，不动仓库里其他改动；MD5 不一致则不提交）。**永不 push** |
@@ -64,11 +65,19 @@ python scripts/distribute.py --skill pacvue-common-utils --skill creativehub-int
 | `IdeaProjects/` 下各仓库内的 `.claude/skills` | 默认排除；要同步加 `--include-repos` |
 | `ai.opencode.desktop` | 始终排除（未经确认不覆盖） |
 
-## 只覆盖，不删除
+## 默认只覆盖；残留看过清单再清理
 
-🔴 **脚本永远不删除目标里的文件。** 源里删掉、目标里还留着的，结尾会列成「残留」，
-**只提示不动手**：删除可能被权限拦，更可能删掉对方工具的本地改动。
-看到残留列表自己判断 —— 常见原因是某个 reference / script 被重命名或抽成了独立 skill。
+🔴 **默认不删除目标里的文件。** 源里删掉、目标里还留着的，结尾会列成「残留」，**只提示不动手**：
+残留也可能是对方工具在副本里新加的本地文件，盲删就丢了。
+
+**在源里删了 / 改名了文件（脚本、reference、目录），分发后必须清理残留**，否则其他工具里会留着旧文件被继续用：
+
+1. 先不带 `--prune` 正常分发，看结尾的「残留」清单（只显示前 40 条，数量多时按文件名归类核对）
+2. 确认清单里都是源里删掉 / 改名的旧文件（如移除的 `scripts/distribute.py`、`__pycache__`），**不是**别的工具自己新加的文件
+3. 向用户报告残留数与归类，用户同意后加 `--prune` 重跑：复制全部成功且 MD5 全一致才删，并连带删掉清空的目录
+4. 报告真实数字：「已清理残留 N 个，失败 M 个」；失败（权限等）逐条列出
+
+不能确认的残留（看不出来源）不要 `--prune`，单独列给用户。
 
 ## 🔴 复制前先查「目标被别处改过」（退出码 3 = 停下问用户）
 

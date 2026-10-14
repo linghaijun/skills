@@ -93,22 +93,25 @@
 | `验证中` | 已被某会话认领，正在验（**带会话 + 窗口标识**） | `[open]` |
 | `修复中` | 验出问题、正在修（**仍归原会话**，别人不许抢） | `[open]` |
 | `通过` | 实测通过 | `[done]` |
-| `失败` / `阻塞` / `部分` / `走读证据` / `跳过` | 口径见 §6、§6.1 | `[open]` |
+| `阻塞` | 验不了 / 卡在外部依赖，需人工介入（`verify_state.py finish` 会提示回写 `[blocked]`） | `[blocked]` |
+| `失败` / `部分` / `走读证据` / `跳过` | 口径见 §6、§6.1 | `[open]` |
 
 🔴 只有 `通过` 回写 `[done]`。**`验证中` 不是通过**，任何时候都保持 `[open]`。
+🔴 **`[open]` 与 `[blocked]` 在交付门禁里同等拦截**（`validate_step.py` 的交付门禁两者都判 FAIL）——
+「放着不管」和「我卡住了」都不是放行；要放行只有一条路：`[waived]` + 证据验收报告里点名该 AC 的「风险接受记录」。
 
 ### 12.2 认领 / 收尾 / 回收
 
 ```bash
-python scripts/verify_state.py init    --dir docs/develop/{...}
-python scripts/verify_state.py list    --dir docs/develop/{...}    # 认领前先看
-python scripts/verify_state.py claim   --dir docs/develop/{...} --ac AC-03 --session s2 --window tab:1234
-python scripts/verify_state.py fix     --dir docs/develop/{...} --ac AC-03 --session s2 --note "问题摘要"   # 验证中 -> 修复中
-python scripts/verify_state.py mine    --dir docs/develop/{...} --session s2   # 本会话占用的 AC 与窗口
-python scripts/verify_state.py finish  --dir docs/develop/{...} --ac AC-03 --session s2 --status 通过
-python scripts/verify_state.py reclaim --dir docs/develop/{...} --ac AC-07 --session s3 --window tab:9999 --ttl 20
-python scripts/verify_state.py invalidate --dir docs/develop/{...} --acs AC-03,AC-07 --reason "16:20 改 Foo.vue"   # 改代码后作废受影响 AC
-python scripts/verify_state.py backfill-duration --dir docs/develop/{...} --dry-run   # 漏计时：按 NOTES 用时 / 证据时间回填耗时
+py scripts/verify_state.py init    --dir docs/develop/{...}
+py scripts/verify_state.py list    --dir docs/develop/{...}    # 认领前先看
+py scripts/verify_state.py claim   --dir docs/develop/{...} --ac AC-03 --session s2 --window tab:1234
+py scripts/verify_state.py fix     --dir docs/develop/{...} --ac AC-03 --session s2 --note "问题摘要"   # 验证中 -> 修复中
+py scripts/verify_state.py mine    --dir docs/develop/{...} --session s2   # 本会话占用的 AC 与窗口
+py scripts/verify_state.py finish  --dir docs/develop/{...} --ac AC-03 --session s2 --status 通过
+py scripts/verify_state.py reclaim --dir docs/develop/{...} --ac AC-07 --session s3 --window tab:9999 --ttl 20
+py scripts/verify_state.py invalidate --dir docs/develop/{...} --acs AC-03,AC-07 --reason "16:20 改 Foo.vue"   # 改代码后作废受影响 AC
+py scripts/verify_state.py backfill-duration --dir docs/develop/{...} --dry-run   # 漏计时：按 NOTES 用时 / 证据时间回填耗时
 ```
 
 - 🔴 **开始前 claim，收尾 finish**；禁止「跑完再补登记」（中间那段时间别人无法判断这条是否在验）
@@ -159,8 +162,8 @@ python scripts/verify_state.py backfill-duration --dir docs/develop/{...} --dry-
 - 看板：明细「终验」列 + 按终验筛选 + 总览卡片 + 风险（不通过=高，「已完结但未终验」聚合为低）
 
 ```bash
-python scripts/verify_state.py final --dir <需求目录> --ac ALL  --session s1 --status 终验中
-python scripts/verify_state.py final --dir <需求目录> --ac AC-01 --session s1 --status 终验通过 --note "证据支撑结论"
+py scripts/verify_state.py final --dir <需求目录> --ac ALL  --session s1 --status 终验中
+py scripts/verify_state.py final --dir <需求目录> --ac AC-01 --session s1 --status 终验通过 --note "证据支撑结论"
 ```
 
 完整核对维度见测试步骤文件的「证据终验」节（全栈 `step-11` §11.6 / 后端 `step-10` §10.6）。
@@ -194,7 +197,7 @@ CP-58118 一轮里连续出了 7 次（AC-90 接力验完状态停在「部分�
 
 | 汇报里有 | 回写到 |
 |---|---|
-| 某 AC 结论（含接力补完的另一半） | `verify_state.py finish --status <结论> --force`（状态以 RESULT 为准）；RESULT.md 首行结论 |
+| 某 AC 结论（含接力补完的另一半） | 状态以 RESULT 为准回写 `verify_state.py`：**当前是「验证中」** → `finish --dir <需求目录> --ac <AC> --session <自己> --status <结论>`；**已经完结（通过/失败/阻塞/部分/走读证据/跳过）** → 先 `claim --dir <需求目录> --ac <AC> --session <自己> --window <窗口> --force` 回到「验证中」，再 `finish`。🔴 **`finish --force` 改不了状态**（`finish` 要求当前是「验证中」，对已完结状态一律拒绝 exit 1）。同时 `RESULT.md` 顶层第一条写 `- 结论：<状态词>`（门禁按它比对，引用块里的历史结论不算；词表同 §12.1） |
 | 回归项 R-NN 结论 | 回归清单该行**和**底部汇总的计数 / 豁免列表 |
 | 一项任务完成 | `tasks.md` 勾选并注明证据位置 |
 | 新增 / 改动 AC、Q&A | Checklist、矩阵对应小节、`case.md` 原文、Jira 纯净版；Q&A 按「状态 / 问题描述 / 已选 / 当前结论 / 来源」五项写 |

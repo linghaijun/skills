@@ -3,7 +3,7 @@
 
 用法（AI 先用 Atlassian MCP getJiraIssue 取 summary 与 Sprint 字段，再调本脚本）：
 
-    python scripts/init_workdir.py --project <后端仓根> --jira CP-58118 \
+    py scripts/init_workdir.py --project <后端仓根> --jira CP-58118 \
         --sprint "26Q4-Sprint1 - Nova" --title "[Creative Hub] - 图片/Creative生成 - 支持AI生成Hook 与Scene 2个独立信息"
 
 - 同一票号的目录已存在（docs/develop 下任一层名里含该票号，排除 archived/ tools/）→ 直接复用，不新建。

@@ -4,8 +4,9 @@
 // 🔴 别在宽视口（CDP_VIEWPORT=wide）下用：弹出层坐标会算错，选项叠在一点、点了不生效（SCRIPTS.md 坑 26）
 // 🔴 Group by 记忆存 localStorage（userid_<uid>_groupBy__CreativePage，同实例各标签共享）
 import { connect } from "../../scripts/conn.mjs"; import fs from "node:fs";
+import { makeBusyGone, waitBusyGone } from "./wait-lib.mjs";
 const want = process.argv[2]; const c = await connect();
-const busy = () => c.ev(`[...document.querySelectorAll(".el-loading-mask,.pacvue-loading-mask")].some(e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0&&getComputedStyle(e).display!=="none"&&!e.closest('.el-dialog,.el-drawer')})`);
+const busyGone = makeBusyGone(c);
 const label = () => c.ev(`(() => { window.scrollTo(0,0); const e=[...document.querySelectorAll('span')].find(e=>e.childElementCount===0 && /^(Asset|Ad|Asset Group)( - .*)?$/.test(e.textContent.trim()) && e.getBoundingClientRect().width>0 && !e.closest('.surely-table,.pacvue-table-title-cell')); if(!e) return null; e.scrollIntoView({block:'center'}); const r=e.getBoundingClientRect(); return {t:e.textContent.trim(), x:r.x+r.width/2, y:r.y+r.height/2}; })()`);
 const cur = await label(); if (!cur) { console.error("group-by control not found"); process.exit(3); }
 if (cur.t === want) { console.log("already", want); c.close(); process.exit(0); }
@@ -16,7 +17,7 @@ for (let attempt = 0; attempt < 3 && !opt; attempt++) {   // 下拉偶发没打�
 }
 if (!opt) { console.error("option not found: " + want); process.exit(4); }
 await c.click(opt);
-for (let k = 0; k < 120; k++) { await c.sleep(1000); if (!(await busy()) && k > 2) break; }
+await waitBusyGone(c, busyGone, { minTicks: 4, label: "group-by" });
 await c.ev(fs.readFileSync(new URL("./ads-table-attach.js", import.meta.url), "utf8"));
 const gv = await c.ev(`window.__ct && window.__ct.groupByValue`);
 console.log(JSON.stringify({ from: cur.t, to: want, groupByValue: gv })); c.close();

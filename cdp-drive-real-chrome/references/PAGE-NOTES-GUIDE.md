@@ -52,4 +52,4 @@ UI 改版比什么都快。一条写错的「点这里」会让下次按旧路�
 
 | 项目 | 文件 | 最后验证 |
 |---|---|---|
-| creative-management（Ads / Library / Tag / Analysis / Dashboard） | `projects/creative-management/PAGE-NOTES.md` | 2026-10-10 |
+| creative-management（Ads / Library / Tag / Analysis / Dashboard） | `projects/creative-management/PAGE-NOTES.md` | 按节标注；最新 2026-10-14（图片 Creative 生成页） |

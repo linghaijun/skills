@@ -37,7 +37,7 @@ JQL: parent = <父票> AND issuetype in subTaskIssueTypes() ORDER BY key ASC
 ### 2～3. 匹配 + 落盘（用脚本，别手写表）
 
 ```bash
-python scripts/handover_match.py \
+py scripts/handover_match.py \
   --dir docs/develop/<需求目录> \
   --parent CP-xxxxx \
   --subtasks docs/develop/<需求目录>/subtasks.json \
@@ -78,12 +78,12 @@ python scripts/handover_match.py \
 1. `listJiraIssueTransitions` → 选**目标状态名为 Testing**（或站点等价名，如 `Testing` / `测试中`）的 transition；拿不准先列给用户
 2. `transitionJiraIssue` 执行该 transition
 3. `lookupJiraAccountId`（或 `listJiraIssueAssignableUsers`）解析转交人邮箱 → `editJiraIssue` 设 `assignee`
-4. 每条结果写入 `.handover-state.json` 的 `jiraActions` 与映射报告「提测执行」节
+4. 每条结果用 `py scripts/handover_state.py --dir <需求目录> record-jira --key <KEY> --transition ok|fail|skip --assign ok|fail|skip --detail "…"` 写入 `.handover-state.json` 的 `jiraActions`（`已提测` 而 `jiraActions` 为空，validate_step 会告警），并写进映射报告「提测执行」节
 
 然后：
 
 ```bash
-python scripts/handover_state.py decide --dir <develop> --status 已提测
+py scripts/handover_state.py --dir <需求目录> decide --status 已提测   # --dir 必须写在子命令之前
 ```
 
 部分失败：报告里列失败 key + 原因；状态仍可标 `已提测`，但必须注明「部分失败，须人工补」；**不得假装全成功**。
@@ -94,7 +94,7 @@ python scripts/handover_state.py decide --dir <develop> --status 已提测
 ### 5b. 用户明确不提测
 
 ```bash
-python scripts/handover_state.py decide --dir <develop> --status 无需提测 --note "<用户原话摘要>"
+py scripts/handover_state.py --dir <需求目录> decide --status 无需提测 --note "<用户原话摘要>"
 ```
 
 **禁止** transition / assign。报告写清「用户选择无需提测」。
@@ -117,4 +117,4 @@ python scripts/handover_state.py decide --dir <develop> --status 无需提测 --
 - **不替代**《测试交接文档》（仍在 Step13 产出；提测时交给 QA）
 - **不改** Checklist `[done]` / `.verify-state.json` / 证据终验状态
 - Step3 的「同步 AC 进 Jira checklist」仍属 `prd-to-jira-ac`；本步只做 **AC ↔ 已有 Sub-task** 匹配与提测流转
-- 父票下没有 Sub-task：映射全员 `unmatched`，仍问是否提测；若提测则说明「无可流转 subtask」，终态可记 `已提测`（动作 0 条）或请用户先建 subtask——**以用户裁决为准**
+- 父票下没有 Sub-task：JQL 确认为空后 `handover_match.py` 加 `--allow-empty`（否则脚本拒绝空列表），映射全员 `unmatched`，仍问是否提测；若提测则说明「无可流转 subtask」，终态可记 `已提测`（动作 0 条）或请用户先建 subtask——**以用户裁决为准**

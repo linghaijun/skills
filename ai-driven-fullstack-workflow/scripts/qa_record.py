@@ -26,12 +26,12 @@
 （把 md 恢复为改动前）。validate_step.py 对「待确认」改动判 FAIL —— 不靠记忆。
 
 用法：
-    python scripts/qa_record.py show    --dir <需求目录>
-    python scripts/qa_record.py check   --dir <需求目录>
-    python scripts/qa_record.py changes --dir <需求目录>
-    python scripts/qa_record.py ack     --dir <需求目录> --id <改动id> [--note 已同步 Spec/Checklist]
-    python scripts/qa_record.py reject  --dir <需求目录> --id <改动id> [--note ...]
-    python scripts/qa_record.py pm      --dir <需求目录> [--format md|csv|text] [--out 文件]
+    py scripts/qa_record.py show    --dir <需求目录>
+    py scripts/qa_record.py check   --dir <需求目录>
+    py scripts/qa_record.py changes --dir <需求目录>
+    py scripts/qa_record.py ack     --dir <需求目录> --id <改动id> [--note 已同步 Spec/Checklist]
+    py scripts/qa_record.py reject  --dir <需求目录> --id <改动id> [--note ...]
+    py scripts/qa_record.py pm      --dir <需求目录> [--format md|csv|text] [--out 文件]
 """
 from __future__ import annotations
 
@@ -485,6 +485,20 @@ def export_pm(req: Path, fmt: str = "md") -> str:
                         "\n".join(f"{o['key']}. {o['text']}" for o in q["options"]),
                         q["当前结论"], q["来源"]])
         return "﻿" + buf.getvalue()  # BOM：Excel 直接双击打开不乱码
+    if fmt == "text":
+        # 粘进 IM / Jira 备注用：无 Markdown 记号，一行一条，选项缩进
+        out = [f"待产品确认问题（{req.name}）—— 共 {len(items)} 条，导出时间 {now_iso()}", ""]
+        for i, q in enumerate(items, 1):
+            out.append(f"{i}. {q['title']}（{q['id']}）")
+            for ln in (q["问题描述"] or "").splitlines():
+                if ln.strip():
+                    out.append("   " + ln.strip())
+            for o in q["options"]:
+                out.append(f"   - {o['key']}. {o['text']}")
+            if q["当前结论"]:
+                out.append(f"   当前倾向：{q['当前结论']}")
+            out.append("")
+        return "\n".join(out) + "\n"
     out = [f"# 待产品确认问题（{req.name}）", "", f"共 {len(items)} 条，导出时间 {now_iso()}", ""]
     for i, q in enumerate(items, 1):
         out += [f"## {i}. {q['title']}（{q['id']}）", "", q["问题描述"], ""]
@@ -543,7 +557,7 @@ def main() -> int:
         c = resolve_change(req, a.id, "已确认" if a.cmd == "ack" else "已驳回", a.note)
         print(f"{c['id']} → {c['status']}")
     elif a.cmd == "pm":
-        text = export_pm(req, "csv" if a.format == "csv" else "md")
+        text = export_pm(req, a.format)
         if a.out:
             Path(a.out).write_text(text, encoding="utf-8")
             print(f"已导出 {a.out}")

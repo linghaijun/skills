@@ -2,6 +2,7 @@
 
 > 2026-10-13 由 `SKILL.md` §2.5 / §2.6 原样迁入（内容完整保留，只补了子 agent brief 漏掉的 `sconn.mjs` / `chk401.mjs` 两项，使之与 `SCRIPTS.md` 坑 35/36、workflow playbook §12 一致）。
 > 外部文档引用的「cdp skill §2.5 / §2.6」即本文同名两节；`SKILL.md` 里只留硬提醒 + 链接。
+> 2026-10-14 补：本文 / `SKILL.md` 里的 `node xxx.mjs` / `node scripts/xxx.mjs` **都以本 skill 目录为工作目录**（把 `SKILL` 换成实际路径即可），不是相对项目仓。
 > 脚本用法与坑全文以 [`SCRIPTS.md`](SCRIPTS.md) 为准；`verify_state.py` 不在本 skill，在 `ai-driven-fullstack-workflow/scripts/`（后端工作流同名脚本同用法）。
 
 ## §2.5 并行 / 多账号：一个账号一个实例
@@ -34,7 +35,7 @@ sleep 20 && sleep 7200   # 保活
 
 > 🔴 **先跑自检确认这条路在当前实例可用**（顺带是可复用骨架）：
 > ```bash
-> node scripts/ctx-isolate.mjs --port 9222
+> node "$SKILL/scripts/ctx-isolate.mjs" --port 9222
 > # 预期：A 再读 acct=ADMIN / B 再读 acct=VIEWER —— 互不可见即隔离生效，脚本自带清理
 > ```
 
@@ -62,20 +63,20 @@ await send("Target.disposeBrowserContext", {browserContextId});
    要**轮询 `location.href` 直到落在目标域**再操作（实测直接 `setTimeout` 等固定时长不可靠）
 3. **dispose 即丢登录态** —— 所以 B 不适合"用户手动登录"的场景，每轮都要重登
 
-驱动时用 `--port` 指定实例：
+驱动时用 `--port` 指定实例（`SKILL=<skill 目录>`，见文首）：
 
 ```bash
-node cdp.mjs --list --port 9222          # 看该实例有哪些 page target
-node cdp.mjs expr.js --port 9223         # 在受限账号实例上执行
-node cdp.mjs expr.js --shot --port 9223 --out AC-14-01-no-permission.png
+node "$SKILL/scripts/cdp.mjs" --list --port 9222          # 看该实例有哪些 page target
+node "$SKILL/scripts/cdp.mjs" expr.js --port 9223         # 在受限账号实例上执行
+node "$SKILL/scripts/cdp.mjs" expr.js --shot --port 9223 --out AC-14-01-no-permission.png
 ```
 
 **同实例多标签并行**（同账号、只读 AC）：🔴 一律按 `targetId` 锁（`--target <id>` 或 `CDP_TARGET=<id>`）。
 `--match` / `--index` 只适合单窗口：`/json/list` 顺序随标签激活变化，并行时按序号会连错（`SCRIPTS.md` 坑 30）：
 
 ```bash
-node cdp.mjs expr.js --port 9222 --match "/Asset" --index 0     # 仅单窗口 / 临时排查
-node cdp.mjs expr.js --port 9222 --target <targetId>             # 并行用这个
+node "$SKILL/scripts/cdp.mjs" expr.js --port 9222 --match "/Asset" --index 0     # 仅单窗口 / 临时排查
+node "$SKILL/scripts/cdp.mjs" expr.js --port 9222 --target <targetId>             # 并行用这个
 ```
 
 🔴 **并行时 `--out` 必须逐个区分**，默认都写 `cdp-shot.png`，会互相覆盖。
@@ -92,7 +93,7 @@ node cdp.mjs expr.js --port 9222 --target <targetId>             # 并行用这�
    - **写持久化偏好**：列配置 / KPI 卡片 / Group by 记忆 / 图表指标 / 日期范围等存 **localStorage** 的东西 —— 同一实例的所有标签**共享 localStorage**，A 组改列配置会改掉 B 组的列
    - **写业务数据**（新建 / 编辑 / 删除）—— 一律串行，各自单独认领（出问题才能归因）
    - **前后依赖**（「离开再进入保留上次配置」这类，依赖前一步落盘）
-3. **开窗并登记**：`node scripts/tab-open.mjs --open <url> --n <组数> --name g1,g2,…` → 每组拿到一个 `targetId`，
+3. **开窗并登记**：`node "$SKILL/scripts/tab-open.mjs" --open <url> --n <组数> --name g1,g2,…` → 每组拿到一个 `targetId`，
    登记到 `verify_state.py claim --window cdp:9222/<targetId>`（脚本在 `ai-driven-fullstack-workflow/scripts/`）；
    之后该组所有脚本都带 `CDP_TARGET=<targetId>`（`cdp.mjs` / `stage-shot.mjs` 也可用 `--target`）。
    2026-10-13 起 `real-click` / `net-cap` / `vtable-scroll` / `stage-shot` / `run-page` 均已读 `CDP_TARGET`（此前只认 `--target`，设了 env 也会连到别的窗口）
@@ -101,7 +102,7 @@ node cdp.mjs expr.js --port 9222 --target <targetId>             # 并行用这�
    并发上限受后端列表接口拖慢约束（≤4 个窗口同时跑重查询），超过就排队而不是串行。
    子 agent 的 brief 必须写明，缺一项就会串扰或返工：
    - **自己的 targetId**（`CDP_TARGET=…`）+ **点名禁止碰的其它 targetId**；需要别的页面时用 `tab-open.mjs` **自己开窗**、用完 `--close`
-   - 🔴 **连接一律 `sconn.mjs`**（= `conn.mjs` 的 hardCap 别名：所有 CDP 调用 ≤30s + bringToFront + screencast 兜底），不得自写无超时的 CDP 客户端（坑 35）
+   - 🔴 **连接一律 `sconn.mjs`**（= `conn.mjs` 的 hardCap 别名：所有 CDP 调用 ≤30s；截图先直接截、不抢前台，兜底顺序见坑 50），不得自写无超时的 CDP 客户端（坑 35）
    - 🔴 **开测先跑 `chk401.mjs`**，每组开始前再跑一次；退出码 2 / 3 立即停下汇报、不自己重试（坑 36）
    - **共享偏好禁改清单**（Group by / Custom Columns / KPI 卡片 / 日期范围 …，同实例 localStorage 共享）与当前偏好状态；带 Apply 的弹框写明「禁止 Apply」或「允许改哪些、改了要记录」（坑 32）
    - 已授权的写 / 下载动作及次数（没写 = 不许做）；不登录、不碰凭据
@@ -110,6 +111,7 @@ node cdp.mjs expr.js --port 9222 --target <targetId>             # 并行用这�
    - 产出 `NOTES.md`（Then 拆断言 → 图号框 / 机器证据字段 → 结论），**不改 RESULT.md / case.md / Checklist**；疑似缺陷只记录不改代码
    - 最终汇报格式：结论 + 关键数据 + 文件清单 + 新坑建议 + 窗口是否已关
    主会话在子 agent 回来之前**不得预判它的结论**，回来后先抽查证据原件再写 RESULT
+   - 🔴 **9222 连不上就停下汇报**，不自己拉 Chrome、不接管现有 Chrome（坑 56）；开测前先确认后端端口在监听（坑 55）
 6. 收尾：`tab-open.mjs --close <自己开的 id>`，不关别人的。🔴 **默认不恢复浏览器现场**（偏好 / 日期 / 分组 / 列配置都不还原，用户约定：浪费时间）；只有用户明确要求才跑 `storage-restore.mjs`（坑 31）
 7. 子 agent **边做边落盘**（每条 AC 的证据与 NOTES 实时写），会话中断后主会话按文件盘点续做（实测 g2 中断过一次，坑 33）
 

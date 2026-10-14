@@ -1,5 +1,5 @@
 // 真鼠标点击：按「选择器 + 可见文本」定位元素中心，派发 CDP 真实鼠标事件。
-// 三种真点击实现怎么选（权威说明见 references/SCRIPTS.md「三种点击」）：
+// 三种真点击实现怎么选（权威说明见 references/SCRIPTS.md「三种真点击怎么选」）：
 //   - 本脚本：给「选择器 + 可见文本」，页签/下拉项这类「有稳定 class + 短文本」的元素最省事；--list 可先列候选
 //   - cdp.mjs <expr.js> --realclick：expr 返回 Element，适合一次性的复杂定位
 //   - L1 click-js.mjs <page.js>：page.js 返回 {x,y}，适合页面级脚本已算好坐标（如 full-number-toggle.js）

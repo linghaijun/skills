@@ -18,8 +18,11 @@ export async function addRefFromLibrary(c, log, sleep) {
   await c.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: lib.x, y: lib.y }); await sleep(200);
   await c.click(lib); log("click Select from Library (reference)"); await sleep(4000);
   const drawerQ = `[...document.querySelectorAll(".el-drawer")].find(d => d.getBoundingClientRect().width > 0)`;
-  // 等抽屉里出现可见的勾选框
-  let cbN = 0; for (let i = 0; i < 40; i++) { cbN = await c.ev(`(() => { const d = ${drawerQ}; return d ? [...d.querySelectorAll(".el-checkbox__inner")].filter(x => x.getBoundingClientRect().width > 0).length : -1; })()`); if (cbN > 0) break; await sleep(500); }
+  // 等抽屉里出现可见的勾选框：旧写法 40×500ms 固定轮询；现在自适应轮询（出现即返回）
+  const cbCount = `(() => { const d = ${drawerQ}; return d ? [...d.querySelectorAll(".el-checkbox__inner")].filter(x => x.getBoundingClientRect().width > 0).length : -1; })()`;
+  let cbN = 0;
+  try { cbN = (await c.waitFor(cbCount, { total: 20000, min: 150, max: 400, label: "library-checkboxes", until: (n) => n > 0 })).value; }
+  catch { cbN = await c.ev(cbCount); }
   out.drawer = JSON.parse(await c.ev(`(() => { const d = ${drawerQ}; return JSON.stringify({ title: d && ((d.querySelector(".el-drawer__title, header") || {}).innerText || "").trim(), checkboxes: ${0} + (d ? [...d.querySelectorAll(".el-checkbox__inner")].filter(x => x.getBoundingClientRect().width > 0).length : -1) }); })()`));
   if (cbN <= 0) throw new Error("drawer has no checkbox " + cbN);
   // 第 1 张卡片的勾选框（卡片内有 img 的那个）

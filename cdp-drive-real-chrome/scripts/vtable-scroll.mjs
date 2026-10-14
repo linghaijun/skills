@@ -13,7 +13,8 @@
 //   --timeout <ms>  页面内整段采集的超时，默认 300000
 //   --out <path>    落盘 JSON（必填，否则行数多时上下文爆掉）
 //   --max-rows <n>  收集到 N 行就停，默认 500，防止无限滚动页跑飞
-//   --hold <ms>     每屏滚动后等待，默认 260（虚拟滚动的懒加载渲染需要时间）
+//   --hold <ms>     每屏渲染等待的**上限**，默认 400（现在主要靠 MutationObserver 等渲染，这个只是兜底；
+//                   实测渲染 <60ms 就返回，不再每屏白等固定时长）
 //   --cell <css>    单元格选择器，默认含 surely-table / el-table-v2
 //   --hdr <css>     表头选择器
 //   --body <css>    滚动容器选择器
@@ -34,7 +35,7 @@ function flag(name, dflt) {
 
 const OUT = flag("--out", "");
 const MAX = Number(flag("--max-rows", 500));
-const HOLD = Number(flag("--hold", 260));
+const HOLD = Number(flag("--hold", 400));
 
 if (!OUT) {
   console.error("MISSING --out");
@@ -73,6 +74,8 @@ const expr = `(async () => {
     .map((c) => ({ title: tx(c), left: R(c).left }))
     .filter((h) => h.title)
     .sort((a, b) => a.left - b.left);
+  // 表头几何在整段滚动里不会变 → 先算好带 title/left 的精简数组供归位用（每屏少一次全表头布局读取）
+  const hdrGeom = hdrEls.map((h) => ({ title: h.title, left: h.left }));
   const body = pick(BODY_SEL, "", "body");
   if (typeof body === "string") return body;
   if (!document.querySelectorAll(CELL_SEL).length) {
@@ -106,13 +109,26 @@ const expr = `(async () => {
       const o = {};
       for (const c of g.cells) {
         let best = null, bd = 1e9;
-        for (const h of hdrEls) { const d = Math.abs(h.left - c.left); if (d < bd) { bd = d; best = h; } }
+        for (const h of hdrGeom) { const d = Math.abs(h.left - c.left); if (d < bd) { bd = d; best = h; } }
         // 超容差留空，不硬塞 —— 错列比缺列更难发现
         if (best && bd < 40 && o[best.title] === undefined) o[best.title] = c.t;
       }
       return o;
     });
   };
+
+  // 滚一屏后「等渲染完」：MutationObserver + setTimeout 双保险，最多 HOLD ms。
+  // 旧写法是固定 sleep(HOLD)，机器快时白等、慢时又不够；现在渲染一动就返回（实测 <60ms）。
+  const waitRender = (ms) => new Promise((res) => {
+    let done = false, ob = null;
+    const fin = () => { if (done) return; done = true; if (ob) { try { ob.disconnect(); } catch (e) {} } res(); };
+    try {
+      ob = new MutationObserver(() => { setTimeout(fin, 40); });
+      ob.observe(body, { childList: true, subtree: true, characterData: true });
+    } catch (e) { /* 没 MutationObserver 就纯靠双保险 */ }
+    setTimeout(fin, Math.min(60, ms));
+    setTimeout(fin, ms);
+  });
 
   const seen = new Set();
   const all = [];
@@ -134,19 +150,23 @@ const expr = `(async () => {
   for (let y = 0; y <= maxScroll + step && all.length < MAX; y += step) {
     sc.scrollTop = y;
   screens++;
-    await sleep(HOLD);
+    await waitRender(HOLD);
     push(readOnce());
     if (sc.scrollTop === y && y > 0) break; // 到底了
   }
   sc.scrollTop = startTop;
 
+  // 🔴 上限要在**返回结果**上生效：while 条件只挡后续屏，首屏 readOnce 可能一次就把 MAX 超掉
+  //   （实测 --max-rows 20 配 130 行一次渲染的页面，原来会返回 130 行 —— 上限形同虚设）
+  const capped = all.length > MAX ? all.slice(0, MAX) : all;
+
   return JSON.stringify({
     scroller: String(sc.className || sc.tagName || "").slice(0, 80),
     step, maxScroll, screens,
-    total: all.length,
-    truncated: all.length >= MAX,
+    total: capped.length,
+    truncated: all.length > MAX,
     hdrCount: hdrEls.length,
-    rows: all,
+    rows: capped,
   });
 })()`;
 

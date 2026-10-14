@@ -11,7 +11,7 @@
 - 章节标题、说明、表格等一切非条目内容
 
 用法：
-    python scripts/checklist_jira.py --dir <需求目录> [--main CP-58118]
+    py scripts/checklist_jira.py --dir <需求目录> [--main CP-58118]
 """
 from __future__ import annotations
 

@@ -17,8 +17,10 @@
 **任何 SQL 在执行前必须先过校验脚本**，退出码非 0 一律不得执行：
 
 ```bash
-python sql-mcp/check_sql.py "<你要执行的 SQL 原文>"
+py sql-mcp/check_sql.py "<你要执行的 SQL 原文>"
 ```
+
+> `sql-mcp/` 不在业务仓内，位置见项目 `AGENTS.md`（本工作区：`IdeaProjects/sql-mcp`，与 `creative-management-all` 平级）。
 
 - 退出码 `0` + 输出 `OK` → 允许执行
 - 非 0 + `REFUSED: <原因>` → **禁止执行**，按原因改写 SQL 后重新校验
@@ -54,7 +56,7 @@ r.scalar()        # 第一行第一列，count/sum 常用
 print(compare({"cost": 1234.56}, {"cost": r.scalar()}))   # 对账，自动出差异表
 ```
 
-命令行：`python query.py ck "SELECT ..."` / `python query.py redis-keys "*rematch*"`
+命令行：`py query.py ck "SELECT ..."` / `py query.py redis-keys "*rematch*"`
 
 | 入口 | 引擎 | 用途 |
 |---|---|---|
@@ -72,7 +74,13 @@ print(compare({"cost": 1234.56}, {"cost": r.scalar()}))   # 对账，自动出�
 `query.py` 自带：自动补 `LIMIT 100`（超限会警告结果可能不完整）、打印只出前 20 行、
 每条 SQL 强制过 `check_sql` 门禁（与 MCP 侧同一套规则）。
 
-平台 → 库名对应见 `sql-mcp/PLATFORM-DATA-MAP.md`。**禁止在生产库上做任何写操作；禁止查与本次 AC 无关的数据。**
+平台 → 库名对应见 `sql-mcp/PLATFORM-DATA-MAP.md`。**生产库允许只读核对（用户 2026-10-14 确认），禁止任何写操作；禁止查与本次 AC 无关的数据。** 本地 / dev / test 后端与 mysql MCP 是同一个生产 US 库，本地操作产生的数据也在里面。
+
+🔴 **并发上限：重查询同时 ≤2**（`browser-verification-playbook.md` 的「最关键的红线」第 13 条 / `step-11` §11.5 /
+`subagent-acceleration.md` 都引用了本条，口径以本文件为准）—— 共享的查询服务（`query.py` / MCP）被慢查询占满时
+**所有会话一起卡住**。
+按 AC 组并行对账时：先把每组 SQL 写好，再**两两并发**跑；明细查询一律带 `LIMIT`，绩效 / CK 类必须带
+`profileId` + 有界日期（见 §3）。
 
 ## 3. 🔴 绩效查询硬约束（必须带 profileId + 日期）
 
@@ -252,7 +260,7 @@ SQL 来源: CreativePerformanceCkMapper.xml:88 | 门禁: check_sql.py OK
 - ❌ 跳过 `check_sql.py` 直接执行 SQL
 - ❌ 任何写操作（含「只是改一条测试数据」）
 - ❌ 绩效表不带 profileId / advertiserId + 日期范围
-- ❌ 在生产库上验证
+- ❌ 在生产库上做任何写操作，或不带过滤条件扫大表（**只读核对允许**，用户 2026-10-14 确认；mysql MCP 连的就是生产 US，代理只读、SELECT 自动 15s 超时）
 - ❌ 把真实客户数据（品牌名 / ASIN / 金额明细）原样贴进报告 —— 脱敏或只留聚合值
 - ❌ 自己编 SQL 当基准，不去对照 mapper
 - ❌ 查平台侧数据前没读 `platform-provider` 的查询逻辑就按表名猜（同名表在不同库各有一份，查错表比查不到更糟）

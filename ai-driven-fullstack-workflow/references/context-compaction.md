@@ -51,12 +51,18 @@
 
 **hook 配置**（Claude Code，写进项目 `.claude/settings.local.json`，路径按本机改）：
 
+> 🔴 **解释器写本机真能跑的那个**：Windows 商店版 `python.exe` 是个假别名 ——
+> `where python` 找得到、执行却直接失败（`Program 'python.exe' failed to run`）。hook 又按设计
+> 静默，于是「续跑提示」永远不出现、也没人知道。先 `py -V` 试一下：能用就写 `py`，
+> 其他平台用 `python3`。`preflight.py` 的「文档命令用的解释器」一项会替你把这件事查出来。
+
 ```json
 {"hooks": {"SessionStart": [{"matcher": "compact", "hooks": [{"type": "command",
-  "command": "python \"C:/Users/<you>/.claude/skills/ai-driven-fullstack-workflow/scripts/compact_resume.py\"",
+  "command": "py \"C:/Users/<you>/.claude/skills/ai-driven-fullstack-workflow/scripts/compact_resume.py\"",
   "timeout": 30}]}]}}
 ```
 
-脚本只读：没有 48 小时内活跃的需求就什么都不输出，出错也静默退出。
+脚本只读：没有 48 小时内活跃的需求就什么都不输出，**出错也静默退出** —— 所以「没提示」不等于
+「不需要续跑」，也可能是解释器 / 路径写错了；压缩后按上面「自己做这三件事」兜底。
 
 > 想让系统更早自动压缩，可以调小 `autoCompactWindow`（settings）或 `CLAUDE_CODE_AUTO_COMPACT_WINDOW`（环境变量）。这是全局行为变化，**默认不改**，用户要求时再设。

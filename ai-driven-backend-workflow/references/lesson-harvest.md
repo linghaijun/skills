@@ -1,6 +1,6 @@
 # 经验沉淀（Lesson Harvest）
 
-> **在哪做**：全局一致性审查的**最后一节**，交付收尾之后 —— 只有走完全程，才知道这次真正的代价是什么。
+> **在哪做**：AC↔Subtask 匹配与提测步落定提测终态（`已提测` / `无需提测`）之后（全栈 Step14 / 后端 Step13）—— 只有走完全程，才知道这次真正的代价是什么。
 > **默认结论**：**本次无新增经验**。
 
 ## 🔴 立场（和「缺陷猎捕」正好相反，别套错）
@@ -158,5 +158,5 @@
 
 **写完必做**
 
-- 🔴 跑 `python scripts/validate_step.py --self-check`，确认 lessons 引用、步号引用、计数行全部自洽
+- 🔴 跑 `py scripts/validate_step.py --self-check`，确认 lessons 引用、步号引用、计数行全部自洽
 - 🔴 skill 改完要**分发到其他 agent 工具目录**（skill `distribute-agent-skills`），否则只有当前这个工具看得到，而且不报错

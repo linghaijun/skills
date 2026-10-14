@@ -1,4 +1,4 @@
-// surely-table 表头按文字导出矩形（截图像素），供 annotate-legend.py 画框；顺带输出可见表头全集
+// surely-table 表头按文字导出矩形（截图像素），供 L0 annotate.py --rects 画框（annotate-legend.py 已 deprecated、不合验收，坑 16g）；顺带输出可见表头全集
 //
 //   CDP_TARGET=<id> node header-rects.mjs out.json "lab=表头1,表头2,…" ["lab2=…"]
 //   每个 lab 取这些表头的外接框；表头文字按空白归一后精确匹配（「Video\nViews」= "Video Views"）

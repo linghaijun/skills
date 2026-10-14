@@ -30,10 +30,10 @@
   - <develop>/index.html：内联总览（证据只带预览）。
 
 用法：
-  python scripts/verify_dashboard.py --dir docs/develop/<需求目录>
-  python scripts/verify_dashboard.py --all --develop docs/develop
-  python scripts/verify_dashboard.py --dir docs/develop/<需求目录> --serve --port 8787
-  python scripts/verify_dashboard.py --dir docs/develop/<需求目录> --no-index   # 不刷新外层总览
+  py scripts/verify_dashboard.py --dir docs/develop/<需求目录>
+  py scripts/verify_dashboard.py --all --develop docs/develop
+  py scripts/verify_dashboard.py --dir docs/develop/<需求目录> --serve --port 8787
+  py scripts/verify_dashboard.py --dir docs/develop/<需求目录> --no-index   # 不刷新外层总览
 
 退出码：0 正常（含降级）；2 用法/前置错误（目录不存在）。
 """
@@ -411,6 +411,24 @@ def detect_workflow(req: Path, forced=None) -> str:
     return "fullstack"
 
 
+def _shared_verdict(text: str):
+    """结论判定复用 `verify_state` 的那一套（表格行 / 顶层 `- 结论：` / 裸 emoji / 兜底）。
+
+    原来这里自带第三套正则（优先级不同、还会产出英文 `NOT_RUN`）：同一个 RESULT.md 在
+    门禁、登记脚本、看板三处可能判成不同结论。统一入口，不可导入时返回 None 走本地兜底。
+    """
+    try:
+        import sys as _sys
+        from pathlib import Path as _Path
+        _sys.path.insert(0, str(_Path(__file__).resolve().parent))
+        from verify_state import _verdict_text, classify_verdict
+        if _verdict_text is None or classify_verdict is None:
+            return None
+        return classify_verdict(_verdict_text(text))
+    except Exception:                                      # noqa: BLE001
+        return None
+
+
 def summarize_result(text: str) -> dict:
     """从 RESULT.md 提取结论/环境/降级/摘要。"""
     verdict = None
@@ -420,17 +438,20 @@ def summarize_result(text: str) -> dict:
             break
     probe = (verdict or text[:800])
     up = probe.upper()
-    v = None
-    if re.search(r"NOT_RUN|未执行|未测|待测试环境执行", up):
-        v = "NOT_RUN"
-    elif re.search(r"\bPASS\b|通过", up):
-        v = "通过"
-    elif re.search(r"\bFAIL\b|失败", up):
-        v = "失败"
-    elif re.search(r"BLOCKED|阻塞", up):
-        v = "阻塞"
-    elif re.search(r"PARTIAL|部分", up):
-        v = "部分"
+    v = _shared_verdict(probe)
+    if v == "待验证":
+        v = "NOT_RUN"        # 看板内部沿用这个值（app.js 渲染时显示「待验证」）
+    if v is None:            # verify_state 不可导入：本地兜底，口径与上面一致
+        if re.search(r"NOT_RUN|未执行|未测|待测试环境执行", up):
+            v = "NOT_RUN"
+        elif re.search(r"\bPASS\b|通过", up):
+            v = "通过"
+        elif re.search(r"\bFAIL\b|失败", up):
+            v = "失败"
+        elif re.search(r"BLOCKED|阻塞", up):
+            v = "阻塞"
+        elif re.search(r"PARTIAL|部分", up):
+            v = "部分"
     env = next((l.strip() for l in text.splitlines() if re.match(r"^\s*\|\s*环境\s*\|", l)), "")
     dg = next((l.strip() for l in text.splitlines() if "证据降级" in l), "")
     return {
@@ -631,7 +652,7 @@ def detect_risks(req_name, acs, regressions, steps, step_spec, ttl, max_attempts
             add("high", a["token"], f"验证{st}：{a.get('note') or '见 RESULT.md'}")
         if st in BUSY and is_busy_stale(a, ttl, now):
             add("high", a["token"], f"「{st}」超过 {int(ttl)} 分钟无更新（可能已中断），可回收",
-                f"python scripts/verify_state.py reclaim --dir <需求目录> --ac {a['token']} "
+                f"py scripts/verify_state.py reclaim --dir <需求目录> --ac {a['token']} "
                 f"--session <你的会话> --window <你的窗口>")
         if st == "通过" and a.get("ck") == "open":
             add("medium", a["token"], "registry 已「通过」但 Checklist 仍 [open]（回写漏了）",
@@ -659,7 +680,7 @@ def detect_risks(req_name, acs, regressions, steps, step_spec, ttl, max_attempts
              and a.get("ck") in ("open", None)]
     if unreg:
         add("low", None, f"{len(unreg)} 条有证据目录但未登记状态：{', '.join(unreg[:8])}",
-            "python scripts/verify_state.py init --dir <需求目录>")
+            "py scripts/verify_state.py init --dir <需求目录>")
     unjust = [r for r in regressions if not r.get("ok")]
     if unjust:
         by = {}

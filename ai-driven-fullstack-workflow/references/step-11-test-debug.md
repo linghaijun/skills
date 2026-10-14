@@ -12,7 +12,10 @@
 门控与 SKILL.md「门控档位」一致：11.1 🟡 通知式；11.3 🔴 阻塞；11.4（步骤文档授权 / 验证报告）与 11.6 涉及写操作授权、脏数据与交付判据，按各节标注的 🔴 阻塞执行；11.2、11.5 不单设门控（失败按 11.2 根因优先自愈；核对结论并入各 AC 的 `RESULT.md` 与所在报告）。
 
 > 🔴 **证据落盘（贯穿本步，强制）**：用例、脚本、结果证据（截图 / 录屏 / 抓包 / 日志）**按 `AC-NN` 归档**到当前需求目录 `tests/AC-NN/`
-> —— `case.md` + `script/` 或 `REPLAY.md`（二选一必须有其一：走后端单测 / 接口脚本的 AC 用 `script/`；走 11.4 Agent 实机验证的前端 AC 因约定不写测试代码，用 `REPLAY.md` 承担「可复跑」）+ `evidence/` + `RESULT.md`。
+> —— `case.md` +（`script/` **或** `REPLAY.md`，「可复跑入口」二选一必须有其一：走后端单测 / 接口脚本的 AC 用 `script/`；
+> 走 11.4 Agent 实机验证的前端 AC **不写测试代码**，用 `REPLAY.md` 承担「可复跑」）+ `evidence/` + `RESULT.md`。
+> 🔴 **「不写测试代码」≠「不存脚本」**：凡**产出过证据**的脚本（fetch patch、标注 / 裁剪、解析、采样）都必须存进
+> `tests/AC-NN/script/`，否则证据验收按 C7 判**验收不通过**（见 `evidence-acceptance.md` C7、`browser-playbook-evidence.md` §4.1）。
 > **一个 AC 一个目录，不合并；没留证的 AC 视为未测**（Step12/13 审查会据此判漏）—— 不按 AC 归档，审查与证据验收就无从反查。
 > 目录树、四件套分工、命名、`NOTES.md` / `tests/_unit/` 的位置 → `doc-output-and-context.md` §一「测试证据目录」（唯一权威位置）。
 
@@ -143,7 +146,10 @@
    - 操作步骤必须具体可执行：`1. 打开 /creative/assets  2. 点击列表第一行的 "Share Asset"  3. 弹窗中选择 Channel=Email`，禁止写"验证分享功能是否正常"这类含糊描述
    - 预期 XHR 从 Step6 API 契约推导，写明端点与要核对的字段名
 4. **异常态构造方案**：loading / 空数据 / 错误 / 权限不足 分别怎么造（见 11.4.2「异常态构造（标准手法）」，逐 AC 写明用哪一种）
-5. **风险与授权清单**（用户确认时逐项勾选；**这是本步唯一一次授权入口**，启动确认不再重复问）：
+5. **风险与授权清单**（用户确认时**逐项**勾选；这是本步的授权入口，启动确认不再重复问「是否执行」）：
+
+   > 🔴 **逐项勾选 = 对该条目的授权，仅此而已**：授权**不跨条目、不跨会话**（上一条 AC 同意过，这一条要重新问）；
+   > 「清单里列了 / 步骤文档里写了」**不构成**授权 —— 未勾选的写操作、清单之后新增的写操作，一律按 11.4.2「写操作授权红线」再问一次。
 
 ```
 | 风险项 | 涉及 AC-NN | 影响说明 | 是否授权 |
@@ -155,7 +161,8 @@
 ```
 
 6. **不验证项与原因**：无法在浏览器覆盖的 AC（纯后端定时任务、MQ 消费等）显式列出并说明由谁兜底
-7. 🔴 **逐 AC 断言表（首测即过）**：Then 拆成一行一个断言，每行写「前置怎么证明 / 用哪个样本（用行模型字段锁平台与类型）/ 哪张标注图第几号框 + 哪个机器证据字段」。
+7. 🔴 **逐 AC 断言表（首测即过）**：Then 拆成一行一个断言，每行写「前置怎么证明 / 用哪个样本（用行模型字段锁平台与类型）/ **证据锚点** + 哪个机器证据字段」。
+   证据锚点按取证形式写：截图 → 「哪张标注图的第几号框」；**录屏 / 动图 → 「文件名 + 时间点」（如 `00:12`），不必也不该写框号**（录屏不画框，见 `doc-output-and-context.md` 证据形式优先级、`browser-playbook-evidence.md` §4 的降级写法）。
    按 playbook §4.0 的 12 条逐项过；写不出来的断言 = 还没想清楚怎么测。**这张表就是证据验收员的判卷标准**，测前对齐，测后才不会被成批退回
 8. 🔴 **并行分组表**：按页面状态分组，标出每组是否写 localStorage 偏好 / 写业务数据 / 有前后依赖（命中则不能与别组并行），
    每组一个窗口（`cdp-drive-real-chrome/scripts/tab-open.mjs` 开窗拿 `targetId`，`verify_state.py claim --window` 登记）。规则与模板见 cdp skill §2.6、playbook §12。
@@ -221,14 +228,19 @@
 - 🔴 **一 AC 一闭环（CRITICAL，禁止批量补证）**：每条 AC **当场走完当场落盘**，再开始下一条：
 
   ```
-  ⓪ 认领登记：verify_state.py claim --ac AC-NN --session <自己> --window <自己开的窗口>
+  ⓪ 认领登记：verify_state.py claim --dir <需求目录> --ac AC-NN --session <自己> --window <自己开的窗口>
      → 该条置「验证中」并登记会话 + 窗口标识（多会话并行时的互斥锁，见下「多浏览器/多会话并行」）
+     🔴 登记文件还不存在（第一次跑）先建：verify_state.py init --dir <需求目录> [--acs AC-01,AC-02]
+        或 verify_state.py init --dir <需求目录> --from-result（按已有 tests/AC-NN/RESULT.md 回填历史状态）
+        —— 没 init 就 claim / final 会直接报错停住；11.6 的 final 也需要登记文件非空（空的会拒跑，
+        免得 --ac ALL 在 0 条上空转「通过」）
   ① 开该 AC 专属 tab（并行）→ 流水天然隔离，无需 marker；
      若复用同一 tab（串行），则记 marker：当前流水条数/时间戳，或 navigate 重进页面清流水
   ② 执行该 AC 的操作步骤（只用 ⓪ 登记的那个窗口）
   ③ 立刻取证：截图/录屏 + read_page 文本 + read_network_requests（只取 marker 之后的请求）
-  ④ 立刻写盘：evidence/ 落文件 + 写 tests/AC-NN/RESULT.md（含本轮 marker 值）
+  ④ 立刻写盘：evidence/ 落文件 + 写 tests/AC-NN/RESULT.md（含本轮 marker 值；顶层第一条 `- 结论：<状态词>` 用 ⑤ 的同一个词）
   ⑤ 收尾登记：verify_state.py finish --ac AC-NN --session <自己> --status <通过/失败/阻塞/…>
+     🔴 登记状态与 RESULT「- 结论：」必须一致 —— validate_step 测试步 / 交付门禁查「用例状态 vs RESULT」，不一致判 FAIL（回写规则见 parallel §12.7）
   ⑥ 刷新看板：⑤ 的 claim / fix / finish / final 登记成功后**自动**重跑 verify_dashboard.py（不用手动跑；
      加 --no-dashboard 才跳过，禁止为省时间跳过）。🔴 每验完一条 AC 看板必须马上体现 ——
      用户靠看板看进度，「全部验完再统一刷新」等于用户全程不知道进度。
@@ -243,14 +255,22 @@
 - 🔴 **边验边修，不攒批（CRITICAL）**：走 AC 时**发现问题立即停下来修，修完接着验这条，验完再进入下一条**。禁止「先把所有 AC 跑完，最后统一修」——攒到最后，现场（截图时机、请求流水、构造态）全丢，一条挂起还会拖垮整轮的结论归属。
 
   ```
-  ① 发现问题 → verify_state.py fix --ac AC-NN --session <自己> --note "<问题摘要>"
+  ① 发现问题 → verify_state.py fix --dir <需求目录> --ac AC-NN --session <自己> --note "<问题摘要>"
      → 状态「验证中」→「修复中」（仍归本会话；别人不许抢，见下「多浏览器/多会话并行」）
   ② 改业务代码（非绕过）：禁止改测试 / 放宽或删断言 / @Disabled 让它变绿（11.2 根因优先）
   ③ 重跑 11.2 编译自愈确认无回归；前端改完先整页刷新再进页面（HMR 可能留坏状态，见 playbook §3）
-  ④ verify_state.py claim --ac AC-NN --session <自己> --window <原窗口> → 回到「验证中」复验
-  ⑤ 复验通过 → finish --status 通过；仍失败 → 同一问题最多 2 轮，第 3 轮停下汇报请求人工介入
+  ④ verify_state.py claim --dir <需求目录> --ac AC-NN --session <自己> --window <原窗口> → 回到「验证中」复验
+     （该 AC 已被上一条链完结时，先 `claim --force` 才能重验 —— 见 §11.6 与 parallel §12.7）
+  ⑤ 复验通过 → verify_state.py finish --dir <需求目录> --ac AC-NN --session <自己> --status 通过
+     （只有「验证中」能 finish；状态已是 通过/失败/部分/阻塞/跳过 的，先 `claim --force` 再 finish）
+     仍失败 → 同一问题最多 2 轮，第 3 轮停下汇报请求人工介入
   ```
+  > 🔴 每个子命令都必须带 `--dir <需求目录>`（`verify_state.py` 把 `--dir` 设成 `required=True`，
+  > 漏了直接 exit 2 = 「必须停」档，一次正常登记就变成一次人工介入）。
 
+  - 🔴 **两条 CRITICAL 的优先级（并行下以「冻结代码」为准）**：**并行验证轮内**（≥2 组同时在测）只修**阻塞缺陷**，
+    非阻塞问题 `fix` 登记 + 留现场证据，攒到本轮收尾一起改一起重验 —— 此时「边验边修」降级为「只修阻塞」；
+    **单组串行验证时**按「边验边修」立即修。拿不准就先判断是不是并行轮（默认并行，见下「并行执行」）
   - 🔴 **每次改代码当场作废受影响 AC**：修复 / 口径变更 / 动公共代码（组件 / 接口 / 工具函数 / Mapper）之后，立刻 `verify_state.py invalidate --dir <需求目录> --acs <受影响 AC> --reason "<HH:MM 文件 改了什么>"`，拿不准就多作废；只记时间线不算登记；`R-NN` 同此 —— 旧证据证明不了新代码，时效类退回曾占验收不通过的一半。全文 → `browser-playbook-parallel.md` §12.4
   - 🔴 **修复若触发跨层改动 / 范围扩散 / 非功能回归 / 架构突破 → 立即停止本步**，回退对应步骤（Step4/5/6/7）重审后再回来（Step12「变更影响重评估」红线）
 
@@ -264,7 +284,7 @@
 - 🔴 **数值类 AC 必须做数据核对**：该 AC 的预期含具体数值 / 条数 / 聚合结果时，抓完 XHR **当场**按 **11.5** 核库对账，结论写进同一份 `RESULT.md`。只比对页面和 XHR **不算验证通过** —— 接口返回什么就显示什么，证明不了这个数是对的
 - 🔴 **落库类 AC 必须做全量核对**：该 AC 的结果在库里留了痕（同步 / 迁移 / 批量写入 / 定时任务 / 权限可见性）时，除了用当前账号实机验证，**必须再按账号/租户分组核一次全量** —— 浏览器只看得见你登的那个账号，别的账号漏了、串了、重了，它一个都报不出来。**查出任何差异账号，即便当前账号正常，本条 AC 也不得判通过**
 - **控制台**：`read_console_messages` 取 `onlyErrors`，任何 JS 报错一律记为缺陷
-- **复跑说明落盘**：每条 AC 走完后，把该 AC 的环境 / 账号角色 / 前置数据 / 编号操作步骤 / 预期 XHR 写入 `tests/AC-NN/REPLAY.md`。Agent 实机验证轨**不产出 `script/`**，由 `REPLAY.md` 承担"可复跑"职责（详见 `doc-output-and-context.md` §一「测试证据目录」）
+- **复跑说明落盘**：每条 AC 走完后，把该 AC 的环境 / 账号角色 / 前置数据 / 编号操作步骤 / 预期 XHR 写入 `tests/AC-NN/REPLAY.md`。Agent 实机验证轨**不写测试代码**（前端不写单测 / 组件测试），由 `REPLAY.md` 承担「可复跑」；但**产出过证据的脚本必须存进 `script/`**（fetch patch、标注 / 裁剪、解析、采样 —— scratchpad 不算存档，证据验收按 C7 判不通过），细则见 `evidence-acceptance.md` C7 与 `doc-output-and-context.md` §一「测试证据目录」
 
 
 #### 🔴 并行执行（默认就并行）
@@ -284,7 +304,8 @@
 - 🔴 **开始前 `claim`（登记会话 + 窗口标识），收尾 `finish`**；禁止「先跑完再补登记」
 - 🔴 **一条 AC 同一时刻只能一个会话占用**（`验证中` 或 `修复中`）：被占且未超时就换一条，不许抢；僵死超 TTL（默认 20 分钟）才 `reclaim` 并记回收自谁
 - 🔴 **每个会话只操作自己登记的窗口**，每次工具调用显式带自己的 `tabId`；窗口不共享、不借用
-- 🔴 **只有 `通过` 回写 `[done]`**；`验证中` / `修复中` 及其余状态一律保持 `[open]`（状态枚举 `待验证 | 验证中 | 修复中 | 通过 | 失败 | 阻塞 | 部分 | 走读证据 | 跳过`）
+- 🔴 **只有 `通过` 回写 `[done]`**；`验证中` / `修复中` / `失败` / `部分` / `走读证据` / `跳过` 一律保持 `[open]`，`阻塞` 回写 `[blocked]`（`verify_state.py finish` 会打印该回写哪个）；11.3 已置 `[done]` 的 AC 实机结论不是「通过」时**退回 `[open]`**（状态枚举 `待验证 | 验证中 | 修复中 | 通过 | 失败 | 阻塞 | 部分 | 走读证据 | 跳过`）
+  - 🔴 交付门禁对 `[open]` 与 `[blocked]` **同等拦截**；要放行只有 `[waived]` + 证据验收报告里的风险接受记录（`browser-playbook-parallel.md` §12.1）
 - 🔴 **写操作 AC、有依赖的 AC 一律串行且各自单独 `claim`**
 
 **子 agent 并行时**：派发子任务时就写死它的 `--session` 与独占的 `--window`，任务描述里明确「只碰这个窗口」；会话之间靠登记文件协调，不靠共享上下文。
@@ -338,6 +359,7 @@ D.截图清单: | AC-NN | 文件名（相对 tests/AC-NN/evidence/ 的路径） 
 E.遗留脏数据: | 数据 | 位置 | 清理方式 | 是否已清理 | 责任人 |
 F.临时改动清理确认: | 仓库 | git status 结果 | 有无残留调试代码 | 结论 |
 G.用例状态与窗口归属: | AC-NN | 状态(最终) | 会话 | 窗口标识 | 开始/结束时间 |   ← 与 tests/.verify-state.json 一致（收尾不得残留「验证中」）
+H.数据核对汇总: | AC-NN | 预期值 | SQL/口径出处 | 实际值 | 结论 |   ← 11.5 的汇总（数值类 / 落库类 AC 必须出现在这里）
 ```
 
 - 截图/录屏存 **`tests/AC-NN/evidence/`**，命名 `AC-NN-序号-<中文描述>-原图/标注.<ext>`（文件名内容用中文，见 `doc-output-and-context.md`「证据文件命名」）；本报告是汇总，逐条明细仍在各 AC 的 `RESULT.md`
@@ -345,7 +367,7 @@ G.用例状态与窗口归属: | AC-NN | 状态(最终) | 会话 | 窗口标识 
 - 🔴 **F 表为强制收尾项（对应 L17）**：11.4 为构造异常态 / 排查问题常会临时改代码或加 `console.log`，本步结束必须**逐仓** `git status` + `git diff --stat` 确认无残留（前端常为多仓：宿主仓 + 嵌套独立仓，每个仓都要查），任一仓有残留必须先清理再出报告
 - 🔴 **浏览器笔记回写（强制收尾项）**：把本轮新知道的回写进项目的页面级笔记（本工作区见 `AGENTS.md`「浏览器笔记与可复用脚本」）——入口路径、操作→XHR 对照、异常态构造方式、踩到的坑、用过的测试数据（**只记登录名，不记任何凭据**），并刷新该文件的验证日期。本轮跨需求复用过第二次的脚本，升级到 `scripts/` 并补齐用途/用法/依赖/最后跑通日期。**不回写等于下次重摸一遍**
 - 收尾时生成 **`tests/README.md`** 索引：顶部「进场检查」小节 + `| AC-NN | 结论 | 用例 | 复跑入口(REPLAY/script) | 证据文件 |`
-- 🔴 **收尾强制刷新看板（终版）**：`python scripts/verify_dashboard.py --dir <需求目录>` → 刷新 `<需求目录>/验证进度看板.html` 与外层 `docs/develop/index.html`；`tests/README.md` 顶部加一行实时看板链接（服务模式 `http://127.0.0.1:8787/index.html#/<URL 编码后的需求目录>`，见 SKILL.md 执行指令 1.5）。每条 AC 的 `claim` / `fix` / `finish` / `final` 登记时 `verify_state.py` 已自动刷新；收尾再跑一次是为了刷新证据清单、RESULT 摘要等快照。看板是辅助产物，缺失/过旧只提示不判 FAIL（见 `doc-output-and-context.md`「验证进度看板」）
+- 🔴 **收尾强制刷新看板（终版）**：`py scripts/verify_dashboard.py --dir <需求目录>` → 刷新 `<需求目录>/验证进度看板.html` 与外层 `docs/develop/index.html`；`tests/README.md` 顶部加一行实时看板链接（服务模式 `http://127.0.0.1:8787/index.html#/<URL 编码后的需求目录>`，见 SKILL.md 执行指令 1.5）。每条 AC 的 `claim` / `fix` / `finish` / `final` 登记时 `verify_state.py` 已自动刷新；收尾再跑一次是为了刷新证据清单、RESULT 摘要等快照。看板是辅助产物，缺失/过旧只提示不判 FAIL（见 `doc-output-and-context.md`「验证进度看板」）
 - 🔴 **G 表与 `tests/.verify-state.json` 必须一致**：收尾时不得残留「验证中」（所有 AC 要么已 `finish`，要么在报告里注明为何中断）；有残留「验证中」视为本步未收尾
 - 本报告是 Step12 AI Review 契约一致性维度的**证据来源**
 
@@ -369,7 +391,7 @@ G.用例状态与窗口归属: | AC-NN | 状态(最终) | 会话 | 窗口标识 
 SQL 必须从既有 mapper 推导、口径对齐、取证落盘、对不上怎么逐层二分、禁止事项）。
 **本节的只读门禁是强制前置，无例外** —— 开查之前先把那份读完。
 
-**→门控**：数据核对结论写入各 AC 的 `RESULT.md`；11.4 有执行时在其报告中增加「G.数据核对汇总」表，11.4 被跳过时单独出《Step 11-数据核对报告.md》
+**→门控**：数据核对结论写入各 AC 的 `RESULT.md`；11.4 有执行时在其报告中增加「H.数据核对汇总」表（G 表已是用例状态与窗口归属），11.4 被跳过时单独出《Step 11-数据核对报告.md》
 
 ## 11.6 证据终验（终验，不重跑浏览器）
 
@@ -391,22 +413,29 @@ SQL 必须从既有 mapper 推导、口径对齐、取证落盘、对不上怎�
 ### 怎么做（登记 + 判定）
 
 ```bash
+# 0) 登记文件不存在 / 为空时先建（否则 final 直接停）：按已有 RESULT.md 回填最省事
+py scripts/verify_state.py init --dir <需求目录> --from-result
 # 1) 认领终验（可批量认领，但只能批量置「终验中」）
-python scripts/verify_state.py final --dir <需求目录> --ac ALL --session s1 --status 终验中
+py scripts/verify_state.py final --dir <需求目录> --ac ALL --session s1 --status 终验中
 # 2) 逐条出结论（每条都得真看过证据，不许批量打钩）
-python scripts/verify_state.py final --dir <需求目录> --ac AC-01 --session s1 --status 终验通过 --note "截图里能读到 50%"
-python scripts/verify_state.py final --dir <需求目录> --ac AC-07 --session s1 --status 终验不通过 --note "截图只有列名，没有该行数值"
+py scripts/verify_state.py final --dir <需求目录> --ac AC-01 --session s1 --status 终验通过 --note "截图里能读到 50%"
+py scripts/verify_state.py final --dir <需求目录> --ac AC-07 --session s1 --status 终验不通过 --note "截图只有列名，没有该行数值"
 ```
 
 - 终验状态：`未终验` → `终验中` → `终验通过` / `终验不通过` / `豁免`，**独立于验证状态、不改变 `status`**
   - `豁免` **仅限用户明确放行**（证据不足仍收口）：Checklist 置 `[waived]`（不是 `[done]`），`--note` 必写放行范围 + 用户原话 + 风险，证据验收报告要有点名该 AC 的「风险接受记录」；AI 不得自行豁免
 - **只有已完结的 AC 才能终验**（待验证/验证中/修复中会被跳过并提示）
 - 🔴 **终验通过 ≠ 可以改 Checklist**：Checklist 仍只按 `status` 回写（只有「通过」→ `[done]`），终验是另一条线索
-- 🔴 **终验不通过按「发现问题」处理**（接 11.4.2 边验边修同一条链）：先看证据缺什么 → 补证据 / 修业务代码 → 必要时才 `claim` 重新做实机复验 → 再重新终验
+- 🔴 **终验不通过按「发现问题」处理**（接 11.4.2 边验边修同一条链）：先看证据缺什么 → 补证据 / 修业务代码 → 必要时才重新做实机复验 → 再重新终验
+- 🔴 **已完结的 AC 要重验/改判，必须带 `--force`**，且顺序是「先 claim 再 finish」：
+  `py scripts/verify_state.py claim --dir <需求目录> --ac AC-01 --session s1 --window tab:1234 --force`
+  → 状态回到「验证中」→ 改完再 `py scripts/verify_state.py finish --dir <需求目录> --ac AC-01 --session s1 --status 通过`。
+  两个必知点：① `claim` 对 `通过/失败/阻塞/部分/走读证据/跳过` 这类已完结状态不加 `--force` 会**拒绝**（exit 1）；
+  ② `finish` **不认 `--force` 改状态** —— 它要求当前状态是「验证中」，对已完结状态直接拒绝，别照抄 `finish … --force`。
 - 改判已终验的结论必须 `--force`（结论是「有人真看过证据」才下的，不能被随手冲掉）
 - 看板实时显示终验：明细「终验」列 + 按终验状态筛选 + 总览「证据终验」卡片 + 风险（不通过=高风险，「已完结但未终验」聚合为低风险）
 
 **→门控**：🔴 **阻塞** —— 汇报「已完结 X / 终验通过 Y / 不通过 Z / 未终验 W」+ 每条不通过的**缺什么证据** + 看板已刷新 → **暂停等确认** → 进入 Step12。
 > 未终验的必须在汇报里列出来（可带条件放行，但不能装作没有）；**存在「终验不通过」时禁止进入 Step12**。
 
-**本步总产出物**：全部 Pass 的后端单测 + 编译通过模块 + 《Step 11-业务逻辑自检报告》 +（可选）《Step 11-浏览器验证步骤》+《Step 11-浏览器实机验证报告》 +（涉及数据核对时）各 AC 的 `db-query.sql` / `db-result.txt` 与 `RESULT.md` 的「数据核对」节 + **`tests/AC-NN/`（每 AC 的用例 / `script/` 或 `REPLAY.md` / 证据 / RESULT）+ `tests/README.md` 索引** + **终验记录**（`tests/.verify-state.json` 的 `final_status` 与看板「终验」列）**（前端不写测试代码）
+**本步总产出物**：全部 Pass 的后端单测 + 编译通过模块 + 《Step 11-业务逻辑自检报告》 +（可选）《Step 11-浏览器验证步骤》+《Step 11-浏览器实机验证报告》 +（涉及数据核对时）各 AC 的 `{AC-NN}-db-query.sql` / `{AC-NN}-db-result.txt`（命名见 `data-reconciliation.md` §7）与 `RESULT.md` 的「数据核对」节 + **`tests/AC-NN/`（每 AC 的用例 / `script/` 或 `REPLAY.md` / 证据 / RESULT）+ `tests/README.md` 索引** + **终验记录**（`tests/.verify-state.json` 的 `final_status` 与看板「终验」列）**（前端不写测试代码）

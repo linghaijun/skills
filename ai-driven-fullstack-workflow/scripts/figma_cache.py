@@ -13,9 +13,9 @@ Figma 设计稿缓存：把 Figma 链接里的节点读下来，落到需求目�
 不依赖 figma MCP 插件：插件常处于 needs_auth，有令牌时直接走 REST API。
 
 用法：
-  python figma_cache.py --dir "docs/develop/<需求目录>" --urls "<figma 链接1>" "<figma 链接2>" ...
-  python figma_cache.py --dir "..." --urls-file links.txt      # 每行一个链接
-  python figma_cache.py --dir "..." --refresh                  # 按索引里已有节点重拉
+  py figma_cache.py --dir "docs/develop/<需求目录>" --urls "<figma 链接1>" "<figma 链接2>" ...
+  py figma_cache.py --dir "..." --urls-file links.txt      # 每行一个链接
+  py figma_cache.py --dir "..." --refresh                  # 按索引里已有节点重拉
 """
 import argparse, json, os, pathlib, re, sys, time, urllib.error, urllib.parse, urllib.request
 
@@ -134,6 +134,10 @@ def read_index(readme):
 
 
 def main():
+    # Windows 管道下 stdout 默认 cp1252，打印中文（含 --help）会 UnicodeEncodeError
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     ap = argparse.ArgumentParser(description="缓存 Figma 节点（截图 + 结构摘要 + 原始数据）到需求目录 figma/")
     ap.add_argument("--dir", required=True, help="需求目录（docs/develop/<...>）")
     ap.add_argument("--urls", nargs="*", default=[], help="Figma 链接（带 node-id），可多个")

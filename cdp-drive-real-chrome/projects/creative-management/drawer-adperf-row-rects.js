@@ -1,6 +1,6 @@
 // 素材详情抽屉 Ad Performance 表：逐行导出「Asset - Ad」格与 Ad Type 格的截图像素框（× dpr）+ 行文字 + 是否有 ID 行
 // 键名 sb1_cell / sd2_type / dsp1_cell …（SB / SD Video、Streaming TV）；表格是 div 布局，不是 <table>，别用 th / tr 定位
-// 截图前后各跑一次、cmp 一致才算同帧；输出直接喂 L0 annotate-rects.py（*_cell 右边界会跨进 Campaign 列，需要时裁到素材格宽度）
+// 截图前后各跑一次、cmp 一致才算同帧；输出直接喂 L0 annotate.py --rects（旧包装 annotate-rects.py 亦可；*_cell 右边界会跨进 Campaign 列，需要时裁到素材格宽度）
 (() => {
   // 抽屉 Ad Performance 表：SD / SB 行的「Asset - Ad」格与 Ad Type 格，截图像素坐标（× dpr）
   const dpr = devicePixelRatio;

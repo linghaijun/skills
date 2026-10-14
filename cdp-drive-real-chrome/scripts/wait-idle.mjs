@@ -1,17 +1,32 @@
-// L0 等页面加载结束：可见的 loading 遮罩连续 N 次都没有（默认 3 次 × 1s，最长 180s）
+// L0 等页面加载结束（兼容入口）—— 2026-10-14 起**转发**到 wait-settle.mjs。
 //
-//   CDP_TARGET=<id> node wait-idle.mjs [--sel ".el-loading-mask,.pacvue-loading-mask"] [--stable 3] [--max 180]
+// 为什么转发：旧实现只看 loading 遮罩（连续 N 次没有），存在「遮罩已消失、旧列表还在屏上」的误判
+//   （PAGE-NOTES 实测：只选 Amazon 后截到 Total 5116，真正加载完是 Total 4145），而且靠 1s 粒度轮询白等。
+//   新实现等的是「网络静默 + DOM 静默 + 遮罩消失（+ 可选行数稳定）」，更快也更不容易给出错结论。
 //
-// 🔴 选择器要写对遮罩本体：Pacvue 是 `.pacvue-loading-mask`（不是 `.pacvue-loading`），
-//    漏了它会在列表还在转圈时就判定「加载完」，读到的是上一个日期 / 上一个分组的旧数据（实测 AC-08 首测就是这样作废的）。
-// 抽屉 / 弹框里的遮罩默认不算（--include-overlay 才算）。
-import { connect } from "./conn.mjs";
-const arg = (n, d) => { const i = process.argv.indexOf(n); return i >= 0 && process.argv[i + 1] ? process.argv[i + 1] : d; };
-const SEL = arg("--sel", ".el-loading-mask,.pacvue-loading-mask,.ant-spin-spinning,.el-loading-spinner");
-const STABLE = Number(arg("--stable", 3)); const MAX = Number(arg("--max", 180)); const OVERLAY = process.argv.includes("--include-overlay");
-const c = await connect(); let ok = 0, i = 0;
-for (; i < MAX; i++) {
-  const busy = await c.ev(`[...document.querySelectorAll(${JSON.stringify(SEL)})].some(e => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(e).display !== 'none' && (${OVERLAY} || !e.closest('.el-dialog,.el-drawer')); })`);
-  ok = busy ? 0 : ok + 1; if (ok >= STABLE) break; await c.sleep(1000);
-}
-console.log(i >= MAX ? `still busy after ${MAX}s` : `idle after ${i}s`); c.close(); process.exit(i >= MAX ? 1 : 0);
+//   CDP_TARGET=<id> node wait-idle.mjs [--sel ".el-loading-mask,.pacvue-loading-mask"] [--include-overlay] [--max 180]
+//
+// 兼容：CLI 参数与退出码（0 就绪 / 1 超时）沿用旧约定，外部文档里的旧命令照旧可用。
+//   --stable <n>（旧的「连续 N 次没遮罩」）不再直接生效 —— 新版把「稳」交给网络/DOM 静默判定；
+//   ⚠️ 想要求「行数连续 N 次一致」请直接用 wait-settle.mjs --stable-rows N。
+//   ⚠️ 新代码一律写 wait-settle.mjs（本文件只为旧命令不失效而留）。
+import { connect, cliTargetOpts } from "./conn.mjs";
+import { waitSettle } from "./wait-settle.mjs";
+
+const flag = (n, d) => { const i = process.argv.indexOf(n); return i >= 0 && process.argv[i + 1] ? process.argv[i + 1] : d; };
+const has = (n) => process.argv.includes(n);
+const OLD_SEL = ".el-loading-mask,.pacvue-loading-mask,.ant-spin-spinning,.el-loading-spinner";
+
+let c;
+try { c = await connect(cliTargetOpts()); } catch (e) { console.error("NO_PAGE_TARGET " + e.message); process.exit(2); }
+
+const t0 = Date.now();
+const r = await waitSettle(c, {
+  sel: flag("--sel", OLD_SEL),
+  overlay: has("--include-overlay"),
+  max: Number(flag("--max", 180)) * 1000,   // 旧参数单位是秒
+});
+const secs = Math.round((Date.now() - t0) / 1000);
+console.log(r.settled ? `idle after ${secs}s` : `still busy after ${secs}s${r.reason ? " (" + r.reason + ")" : ""}`);
+c.close();
+process.exit(r.settled ? 0 : 1);

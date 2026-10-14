@@ -43,12 +43,23 @@ L({ generateBtn: pos });
 if (pos.disabled) { L({ abort: "disabled" }); process.exit(3); }
 const tClick = Date.now(); await c.click(pos); L({ clickGenerate: tClick, clickLocal: new Date(tClick).toString() });
 await snap("F1-first-frame", true);
-for (let i = 0; i < 1500; i++) { const p = await c.ev(`(() => { const a = window.__gall; const r = a[a.length - 1]; return r && r.pct[0] ? parseInt(r.pct[0]) : -1; })()`); if (p >= 30 && p < 99) break; await c.sleep(200); }
+// 帧采样用自适应轮询：旧写法固定 200ms/100ms/40ms 粒度，既可能错过瞬时态又白等
+await c.waitFor(`(() => { const a = window.__gall; const r = a[a.length - 1]; return r && r.pct[0] ? parseInt(r.pct[0]) : -1; })()`,
+  { total: 300000, min: 40, max: 200, label: "F2-running", until: (p) => p >= 30 && p < 99 })
+  .catch(() => L({ missRunning: true }));
 await snap("F2-running", false);
 let hit = false; const tEnd = Date.now() + 600000;
-while (Date.now() < tEnd) { hit = await c.ev(`(() => { const a = window.__gall; const r = a[a.length - 1]; return !!(r && r.pct.includes('100%')); })()`); if (hit) break; const done = await c.ev(`(() => { const a = window.__gall; const r = a[a.length - 1]; return a.length > 20 && !r.gen; })()`); if (done) break; await c.sleep(40); }
+while (Date.now() < tEnd) {
+  hit = await c.ev(`(() => { const a = window.__gall; const r = a[a.length - 1]; return !!(r && r.pct.includes('100%')); })()`);
+  if (hit) break;
+  const done = await c.ev(`(() => { const a = window.__gall; const r = a[a.length - 1]; return a.length > 20 && !r.gen; })()`);
+  if (done) break;
+  await c.sleep(40);
+}
 if (hit) await snap("F3-100pct-hold", true); else L({ miss100: true });
-for (let i = 0; i < 300; i++) { const g = await c.ev(`(() => { const a = window.__gall; return !a[a.length - 1].gen; })()`); if (g) break; await c.sleep(100); }
+await c.waitFor(`(() => { const a = window.__gall; return !a[a.length - 1].gen; })()`,
+  { total: 60000, min: 60, max: 200, label: "gen-done", until: (g) => g === true })
+  .catch(() => L({ missDone: true }));
 await c.sleep(2500);
 await snap("F4-done", false);
 L({ quotaAfter: await quota() });

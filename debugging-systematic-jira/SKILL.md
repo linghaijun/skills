@@ -9,6 +9,8 @@ description: >-
 
 # 系统化排障（中文）
 
+> 🗓 **定期自检**：本 skill 每 7 天 review 一次，记录在同目录 `REVIEW.md`（开头「上次 review：日期」）。使用时若已到期，**主任务收尾后**按 [`references/self-review.md`](references/self-review.md) 做一次并在回复里说明。
+
 随机改代码浪费时间，还会制造新 bug。只治症状 = 失败。
 
 **核心原则：先查清根因，再动手改。**
@@ -46,6 +48,8 @@ description: >-
 ### 阶段 1：根因调查
 
 **在尝试任何修复之前：**
+
+0. **先查项目的历史 bug 经验文档**：工作区 `AGENTS.md` 若引用了这类文档（本机 creative-management-all：`docs/bug-lessons.md`），读索引，命中的条目照「排查同类」先搜一遍 —— 同一模式常常已经出过、已有排查命令
 
 1. **仔细读错误信息**
    - 不要跳过 WARN / ERROR
@@ -137,7 +141,7 @@ description: >-
 1. **先读** `cdp-drive-real-chrome` 的 `references/SCRIPTS.md` + 项目 `PAGE-NOTES.md`
 2. **先判定 Chrome 实例**（看 `--user-data-dir`，勿接日常浏览器）
 3. **开测先 `chk401.mjs`**，登录失效立刻停、交给用户登录
-4. 优先复用 L1 脚本（如 `creativehub-dim-switch.mjs` / `creativehub-drive.mjs`），禁止先现写探针
+4. 优先复用 L1 脚本（如 `creativehub-drive.mjs` / `creativehub-gen-run.mjs`，清单见 CDP `projects/<项目>/README.md`），禁止先现写探针
 5. 🔴 点 Generate / 导出 / 写数据 → **本轮单独取得用户授权**
 6. 证据落盘到 `.workbuddy/tmp/<需求>/` 或需求目录 `tests/AC-NN/evidence/`（gitignore 路径）
 
@@ -161,7 +165,7 @@ description: >-
 操作约定（细则见 [`references/jira-comment-template.md`](references/jira-comment-template.md)）：
 
 1. Ticket 号优先用用户给出的；没有则从分支 / commit 推断，推断不出就问
-2. **有截图时默认嵌进备注**：phase1 → [`scripts/jira-run-upload-command.mjs`](scripts/jira-run-upload-command.mjs) 拿 `fileId` → `addOrEditJiraIssueComment`（`contentFormat: html`，三节 + `<figure data-type="media-single">`）；标题用 `<strong>`，禁止 `<b>`
+2. **有截图时默认嵌进备注**：phase1 → [`scripts/jira-run-upload-command.mjs`](scripts/jira-run-upload-command.mjs) 拿 `fileId` → `addOrEditJiraIssueComment`（`contentFormat: html`，三节 + `<figure data-type="media-single">`）；标题用 `<strong>`，禁止 `<b>`。Atlassian MCP 的这些操作可能不在顶层工具列表里，要先 `discover` 再用 `executeRead` / `executeWrite` 按名调用（见模板文件「MCP 调用方式」）
 3. 修复验证写**断言数字**；图放在对应说明段落下，不要只写「见附件」
 4. 已发过纯文字备注：用 `commentId` **编辑**同一条，塞入 media 节点（已 phase2 的同一 `fileId` 可直接嵌，不必重传）
 5. 🔴 **禁止**本机路径（`.workbuddy/tmp/...`）；禁止凭据 / token / 整页 XHR；失败也写三节
@@ -177,15 +181,17 @@ Jira 备注写完后**立刻**做 harvest。细则见 [`references/harvest.md`](
 |---|---|---|
 | 能跨项目 | **L0 技能级** | CDP `scripts/` + `SCRIPTS.md`；本 skill `references/lessons.md` |
 | 仅本项目页面 | **L1 项目级** | CDP `projects/<项目>/` 脚本 + `README.md` / `PAGE-NOTES.md` |
+| 仅本项目代码模式（会在别的模块复发） | **L1 项目级** | 项目历史 bug 经验文档（本机 `docs/bug-lessons.md`，见下第 5 条） |
 | 仅当次 | **L2** | 留 tmp；**删掉**误放进 skill 的 `_probe-*` |
 
-最低动作（有浏览器验证时）：
+最低动作（第 1~3 条有浏览器验证时做；第 4 条改了 skill 时做；第 5、6 条每次排障都要做 / 判断）：
 
 1. 可复用操作 → 升入 `creativehub-drive.mjs` 一类 L1 驱动，或独立 `*.mjs` 并登记 README  
 2. 页面事实 / 口径 / 坑 → `PAGE-NOTES.md`（带最后验证日期）  
 3. 跨项目坑 / 通用手法 → CDP `SCRIPTS.md` 或本 skill `lessons.md`  
 4. 改了 skill → `node --check` / 自检 → `distribute-agent-skills`  
-5. 回复里用两三行写清「沉淀了什么 → 落在哪」
+5. **会复发的代码模式**（换个模块还会再犯，如「改了去重键、下游 Map 没跟上」「异步回包读当前状态」）→ 追加 / 并入项目历史 bug 经验文档（AGENTS.md 引用的那份，按文档里的模板：事例 / 规则 / 排查同类），并更新索引；**同类并入原条目，不新开**
+6. 回复里用两三行写清「沉淀了什么 → 落在哪」
 
 🔴 **验完不沉淀 = 本 skill 流程未完成**（与「没写 Jira 备注」同级）。
 
@@ -254,6 +260,7 @@ Jira 备注写完后**立刻**做 harvest。细则见 [`references/harvest.md`](
 - [`scripts/jira-run-upload-command.mjs`](scripts/jira-run-upload-command.mjs) — 跑 Media phase1 `uploadCommand` → 打印 `fileId`
 - [`references/harvest.md`](references/harvest.md) — L0 / L1 / L2 落点与收尾清单
 - [`references/lessons.md`](references/lessons.md) — 跨项目排障教训（L0）
+- 项目历史 bug 经验文档（工作区 `AGENTS.md` 引用；本机 `docs/bug-lessons.md`）— 阶段 1 第 0 步读、5.5 第 5 条写
 - 浏览器验证与页面资产：技能 `cdp-drive-real-chrome`（`SCRIPTS.md` / `projects/*/PAGE-NOTES.md`）
 - 分发：技能 `distribute-agent-skills`
 - 失败用例写法：技能 `test-driven-development`（若已安装）

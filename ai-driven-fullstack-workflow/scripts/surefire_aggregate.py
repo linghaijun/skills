@@ -3,7 +3,7 @@
 """单测证据：把当次 surefire XML 全集复制进证据目录，并按 testcase 的 classname 跨文件聚合计数。只用标准库。
 
 用法:
-    python -I surefire_aggregate.py --src <模块>/target/surefire-reports \
+    py -I surefire_aggregate.py --src <模块>/target/surefire-reports \
         --copy-to <需求目录>/tests/_unit/<批次> [--classes FooUnitTest,BarUnitTest] [--out summary.json]
 
     --src      surefire 报告目录（读其中 TEST-*.xml）

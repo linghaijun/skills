@@ -15,9 +15,10 @@
 5. 改既有列（改类型/改长度/加非空/加唯一索引）属**破坏性变更**：必须评估存量数据是否满足新约束，不满足则配套 `data-backfill.sql`，并在文档显式标注风险
 
 **规范**：MySQL 8.0，snake_case。
-- 每表必含：`id`(主键)、`create_time`、`update_time`、`is_deleted`(逻辑删除)、`version`(乐观锁)
+- 每表必含：`id`(主键)、`create_time`、`update_time`、`is_delete`(逻辑删除；新表统一用 `is_delete`，用户 2026-10-14 确认，与项目多数表一致)、`version`(乐观锁)
 - 根据 Checklist 查询条件自动建索引
 - **非功能需求落点**：映射表中"落点=ddl.sql"的行必须在 DDL 实际落地，SQL 注释标注来源（如`-- 支撑"查询<1s"`）；高并发场景优先覆盖联合索引
+- **EXISTS 子查询涉及软删表时，必须加 `AND tx.is_delete = 0`**（见 L1）
 
 **迁移方式（强制）**：手动执行。🔴 **直接给能执行的纯 SQL**（用户偏好）：`ALTER TABLE …` / `CREATE TABLE …` 原样写出，头部一两行注释说明用途与「部署前执行」即可；**不要**用 `SET @x` + `PREPARE` / 存储过程包装幂等，也不要把现状结构大段贴进脚本（现状核对在对话 / 技术方案里说明）。新建表可用 `CREATE TABLE IF NOT EXISTS`。**必须配套 `ddl-rollback.sql`**（每条 DDL 的逆操作）。涉及数据回填另提供 `data-backfill.sql`。
 

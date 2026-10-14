@@ -17,6 +17,8 @@
 |---|---|
 | 入口 | `http://localhost:3001/crossretailer/CreativeManagement/{Dashboard\|Creative\|TagManagement\|Asset}`：Ads `/Creative`；Library `/Asset`；Tag `/TagManagement`；Dashboard `/Dashboard` |
 | 接口前缀 | `/creative-local/`（Vite 代理到后端，不是 `VITE_APP_CREATIVE_MANAGEMENT_URL` 的线上域名） |
+| 库 | 🔴 本地后端连的 MySQL `creative_management` **就是 mysql MCP 连的生产 US 库**（本地 / dev / test 共用；2026-10-14 本地 job 5036 / 5494 在 MCP 里查得到）→ 本地出图、Edit 保存、执行 data.sql **都会写进生产库**，写操作授权时向用户说明 |
+| 后端没起 | Vite 代理回空 body 的 500，页面显示「No product found」「No data found!」，像数据问题 → 先 `curl --noproxy '*'` 看后端端口（SCRIPTS 坑 55） |
 | 登录 | 必须由**用户本人**登录，禁止 agent 代输凭据（CDP 用独立 `--user-data-dir` 实例，登一次持久化；内置浏览器面板见下文专节） |
 | 未登录表现 | URL 被重写成 `http://localhost:3001`（路径丢失），页面停在加载动画，网络请求**全是 Vite 模块加载、零个后端 API** —— 看到这个形态就是没登录，别再等了（CDP 下用 L0 `chk401.mjs --match creative-local` 判定） |
 
@@ -28,6 +30,7 @@
 - 判定「有无数据」**必须看 XHR 响应体**，不能只看 DOM（CDP 下用 `net-cap.mjs` / `xhr-rows-capture.js`；内置浏览器面板做法见专节）
 - 本地 dev + CK 大范围查询，**列表接口 20~40 秒才回是常态**，导出接口可到 40 秒以上
 - 请求列表里**没有状态码**（如只有 `POST …/getCollectionCreativeList`，后面没有 `→ 200 OK`）= 仍在 pending，继续等
+- 🔴 反过来：**秒回 500 且 body 为空** = 后端没在监听（不是没数据），见 SCRIPTS 坑 55
 
 ## 日期范围控件
 
@@ -112,7 +115,12 @@
 - **crossretailer 页全局 `productline` 是 `retailer`**；Creative Generation 的 Ad Type 树里 SB 只挂在 Walmart 下 → 测「按平台反查 Ad Type」要用多个平台都有的值（如 `Image`）才有区分力
 - **Edit Creative 是 `.el-drawer` 不是 `.el-dialog`**；关它里面的 AI 候选弹层点 `.el-drawer__header`
 - **内存挂载（`creativehub-mount-demo.js`）的抽屉里，选品弹层和 Ad Type 下拉点不出来**（`display:block` 但截图看不到、坐标点不中）→ 选品走抽屉的 `init({ productId })`、Ad Type 走组件自己的 `onChange`，证据里标明；**Demo 宿主卡会盖住抽屉**，截抽屉前先隐藏它
-- **Creative 页结果区刷新不保留、Generation Log 不显示文案**：Edit Creative 保存后的内容到库里读回（`ai_generation_job.creative_edit_json` / `asset_name`，按 jobId 只读查询）；本地后端与 mysql MCP 是同一个 `creative_management` 库（2026-10-14 实测 job 5036 / 5494）
+- **Creative 页结果区刷新不保留、Generation Log 不显示文案**：Edit Creative 保存后的内容到库里读回（`ai_generation_job.creative_edit_json` / `asset_name`，按 jobId 只读查询）；本地后端与 mysql MCP 是同一个 `creative_management` 库，即生产 US 库（2026-10-14 实测 job 5036 / 5494；见上文「本地 dev 环境」表「库」行）
+
+- **后端按请求体复用 AI 任务 job**（PD / 卖点 / 优化）：同样的请求体再提交，直接返回已完成的旧 jobId、秒回 SUCCESS → 要拍「优化进行中」，先改一下 Prompt 让请求体不同
+- **AI Optimize 进行中**：Prompt 区盖着遮罩 `.prompt-locked-overlay`；进度轮询约 3.2s 一次；成功后 100% 停留约 0.8s。mock 优化结果固定以 `Optimized: ` 开头，可据此判断 Prompt 是否被覆盖
+- **`pickAdType` 点完叶子后会盲等约 2.5s**，这段时间不采样：要精确的「切换时刻」用 `/ad-type/specs` 请求时间，别用脚本返回时间；只读探查完记得确认下拉已收起（再点会开 / 关切换）
+- **`R.adType`（`creativehub-drive.mjs`）**：2026-10-14 已改为去掉必填星号后匹配「Ad Type」，此前会退化成整个 `document.body`
 
 ### AI 请求体取证（后端日志只在 IDEA 控制台）
 
@@ -225,9 +233,10 @@ Ads 表的 `--` 有三个来源，**处理方式完全不同**：
 ## 需求临时备注（可过期，用前核对日期）
 
 > 只对某次需求 / 某个时间点成立的信息集中在这里，**不删**（复盘与下次同类需求有用），但用之前先核对是否仍成立。
+> 每条末尾的【状态 YYYY-MM-DD】是最近一次 review 的判断：⏳ 快照待重扫 / ✅ 仍有效 / 📦 已沉淀（仅溯源）/ ❓ 待确认。
 
-- **2026-10-10 · client 62 已知缺口（CK 全年扫描）**：Walmart sv 视频指标全为 null、无 Walmart display / sb 视频数据、无 Amazon SD/STV 视频、无 Instacart ⇒ 平台支持度差异类 AC（AC-40/41/42 一类）在 62 上做不了
-- **2026-10-10 · client 777 数据快照（近 12 个月）**：Amazon SB-Video 5s 有值、SD-Video / SD-Image 5s 写成 0（应为 NULL）、Walmart SV 仅 1 行且全 null、无 Instacart 视频、Instacart Display Banner 2s 写成 0 —— 数据随同步回刷会变，开测前重扫（按 productLine | showAdType 统计 null / 0 / 正数）
-- **2026-10-10 · CP-57189 第 1 轮修复回路命名**：`custom-columns-set.mjs` / `compare.mjs on` 产出文件默认前缀 `fix-r1-` 来自这一轮（`fix-r1-cc-log.json`、`fix-r1-01-compare-panel.png`）；别的需求用 `--prefix` 改
-- **2026-10-13 · CP-58118 AC-24/74**：「Given 可达性」没在写 AC 时查规格表，来回 3 轮才定口径 → 已沉淀为上文「规格表」节的规则
-- **2026-10-13 · CP-58118 出图 mock**：后端 `generate-creative-image` / AI 三能力当时写死 mock（图片内容不作证据），**上线前必删**；`creativehub-fields-compare.mjs` 的 `-04` 摘要默认 `evidenceType` 写的就是这个，mock 删除后设 `EVIDENCE_TYPE`
+- **2026-10-10 · client 62 已知缺口（CK 全年扫描）**：Walmart sv 视频指标全为 null、无 Walmart display / sb 视频数据、无 Amazon SD/STV 视频、无 Instacart ⇒ 平台支持度差异类 AC（AC-40/41/42 一类）在 62 上做不了【状态 2026-10-14：⏳ 快照已 4 天，开测前按 productLine | showAdType 重扫】
+- **2026-10-10 · client 777 数据快照（近 12 个月）**：Amazon SB-Video 5s 有值、SD-Video / SD-Image 5s 写成 0（应为 NULL）、Walmart SV 仅 1 行且全 null、无 Instacart 视频、Instacart Display Banner 2s 写成 0 —— 数据随同步回刷会变，开测前重扫（按 productLine | showAdType 统计 null / 0 / 正数）【状态 2026-10-14：⏳ 快照待重扫】
+- **2026-10-10 · CP-57189 第 1 轮修复回路命名**：`custom-columns-set.mjs` / `compare.mjs on` 产出文件默认前缀 `fix-r1-` 来自这一轮（`fix-r1-cc-log.json`、`fix-r1-01-compare-panel.png`）；别的需求用 `--prefix` 改【状态 2026-10-14：✅ 仍有效 —— 脚本默认值仍是 `fix-r1-`，本条解释其来源】
+- **2026-10-13 · CP-58118 AC-24/74**：「Given 可达性」没在写 AC 时查规格表，来回 3 轮才定口径 → 已沉淀为上文「规格表」节的规则【状态 2026-10-14：📦 已沉淀，仅溯源】
+- **2026-10-13 · CP-58118 出图 mock**：后端 `generate-creative-image` / AI 三能力当时写死 mock（图片内容不作证据），**上线前必删**；`creativehub-fields-compare.mjs` 的 `-04` 摘要默认 `evidenceType` 写的就是这个，mock 删除后设 `EVIDENCE_TYPE`【状态 2026-10-14：✅ 仍有效 —— 用户确认 mock 保持不变，已随后端 edb65cf00 本地提交；上线前删 AIHandler MOCK 块并关 GenAiTaskProperties.Mock，删除后本条改 📦，并同步 README「图片 Creative 生成页脚本」节的提醒】

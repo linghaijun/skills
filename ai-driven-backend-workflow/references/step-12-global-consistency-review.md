@@ -36,7 +36,7 @@
 - 单测使用的基础数据是否与 DDL 中的表结构/字段类型一致
 - 🔴 **回归终检**：《Step 7-回归验证清单》全量 `R-NN` 结论是否均为通过；Step11 A4 标出的 🔴 Unverified Regression 是否已清零。**存在未验证回归项不得判 PASS**
 - 🔴 **破坏性变更终检**：Step6「既有端点变更」表中 🔴 项的调用方是否全部适配；兼容期方案是否在 Spec 记录了旧字段清理时间点与责任人
-- **零臆测终检**：Step11 维度 D 标出的 🔴 Unverified Assumption 是否全部已补取证或已获用户确认；文档链（Spec / 技术设计 / API 契约）中是否还残留"待确认 / 应该是 / 按惯例"字样未收敛（见 L8：决策必须回写文档）。**存在未收敛项不得判 PASS**
+- **零臆测终检**：Step11 维度 D 标出的 🔴 Unverified Assumption 是否全部已补取证或已获用户确认；文档链（Spec / 技术设计 / API 契约）中是否还残留"待确认 / 应该是 / 按惯例"字样未收敛（见 L7：决策必须回写文档）。**存在未收敛项不得判 PASS**
 - **证据归档门禁**：每条 `AC-NN` 的 `tests/AC-NN/` 下 `case.md` + （`script/` **或** `REPLAY.md`）+ `evidence/` + `RESULT.md` 是否齐全，`tests/README.md` 索引是否与目录实际一致；**缺证据的 AC 判未测**
   - 🔴 **`case.md` 必须内嵌 Checklist 该条 GWT 原文**，且与 `Step 3-Checklist.md` **逐字一致**（内嵌是副本，会随 Checklist 改动漂移）；不一致判不一致项，必须修
   - 🔴 **作为判定依据的截图必须有标注版**（`-标注`，文件名内容用中文，框 + 编号 + **框边文字说明**，原图保留）；缺标注版判**证据不完整**，与缺证据同等对待。降级形式（zoom 裁剪图 / 录屏标时间点）须在 `RESULT.md` 写明降级理由
@@ -99,11 +99,14 @@ E.修复追溯:
   |------|--------|--------|-------------|
   | ShareController.java:32 | type | shareType | 无（纯代码内重构） |
   | Step 5-ddl.sql:42 | creative_id varchar(64) | creative_id bigint | 是 → 回退 Step5 重审 DDL |
+F.证据验收（独立 subagent，明细见《Step 12-证据验收报告.md》）:
+  | AC-NN | 判定(验收通过/不通过) | 不通过原因(缺证/证据不实) | 补证轮次 |
+  |-------|----------------------|--------------------------|-----------|
 ```
 
-> **前序步骤复检**：交付门禁会按当前产出物重跑前面每一步（不写状态）。`.workflow-state.json` 的绿灯只代表登记那一刻通过，之后改过 Checklist / 矩阵 / 问答记录，旧绿灯不会自己变红；复检报 FAIL 就修好并补跑该步 `--record`。另查「用例状态 vs RESULT」「回归清单汇总 vs 各行」「交接文档时效」，回写规则见 `browser-playbook-parallel.md` §12.7。
+> **前序步骤复检**：交付门禁会按当前产出物重跑前面每一步（不写状态）—— **Spec / 问答记录文首用 `跳过 StepN：理由` 声明过的步不重跑**（B/C 分流，见 `step-01` §0；Step3 与 Step12/13 声明了也不生效）。`.workflow-state.json` 的绿灯只代表登记那一刻通过，之后改过 Checklist / 矩阵 / 问答记录，旧绿灯不会自己变红；复检报 FAIL 就修好并补跑该步 `--record`。另查「用例状态 vs RESULT」「回归清单汇总 vs 各行」「交接文档时效」，回写规则见 `browser-playbook-parallel.md` §12.7。
 
-> **交付门禁 tasks 完成度**：`validate_step.py` 本步要求 tasks.md **全部任务**（含回归任务组）已勾选——回归单测、质量门禁、只读 SQL 结论、前端回归项写进《测试交接文档》都在本步之前完成。
+> **交付门禁 tasks 完成度**：`validate_step.py` 本步要求 tasks.md **全部任务**（含回归任务组）已勾选——回归单测、质量门禁、只读 SQL 结论、需人工回归的项写进《测试交接文档》都在本步之前完成。
 
 ## 交付收尾与代码提交
 
@@ -117,7 +120,8 @@ E.修复追溯:
 
 **提交规范**：
 1. **只 add 相关文件**（业务代码/单测/docs），**禁止 `git add .` / `-A`**
-2. **提交信息**：`feat({需求id}): {需求title}` + 涉及模块 + Checklist 覆盖数 + 一致性审查结论
+2. **提交信息**：按所在仓约定（本工作区 `creative-management/` 为 `feat:CP-xxxxx 描述` / `fix:CP-xxxxx 描述`，type 后可紧贴票号；以项目 `AGENTS.md`「多仓提交」为准）；正文含涉及模块 + Checklist 覆盖数 + 一致性审查结论
+   - 本工作区不是单一 git 仓库：改动落在哪个仓（`creative-management/` / `platform-provider/` / 前端仓）就只在那个仓提交，提交前先读该仓 `.gitignore`
 3. **DDL 单独提醒**：代码提交 ≠ DDL 已执行，需显式提醒"需手动执行 ddl.sql（及回滚脚本）"
 4. **推送**：推 feature 分支，禁 push main/master/release；禁 `--force`；有冲突先 `pull --rebase`
 

@@ -81,6 +81,18 @@ markdown 无（无图或只挂附件时）：
 
 辅助脚本：[`../scripts/jira-run-upload-command.mjs`](../scripts/jira-run-upload-command.mjs)
 
+### MCP 调用方式（2026-10-14 核对）
+
+当前 Atlassian MCP 只把少数操作放在顶层工具（如 `getJiraIssue`、`getAccessibleAtlassianResources`），其余按**操作名**走执行工具：
+
+| 操作 | 怎么调 | 核对结果 |
+|---|---|---|
+| `listJiraIssueComments` | `executeRead`（`responseContentFormat: html` 才能无损回写） | discover 可查到 ✅ |
+| `addOrEditJiraIssueComment` | `executeWrite` | discover 的官方说明里点名引用 ✅；写 html 前可先 `executeRead getContentFormatGuide(toolName=addOrEditJiraIssueComment)` |
+| `uploadAttachmentToJiraIssue`（phase1 / phase2） | `executeWrite` | 本次 discover 未检出 —— **待确认**（可能被会话权限过滤），用前先 `discover "upload attachment jira"` |
+
+🔴 操作名以 `discover` 返回为准，禁止凭记忆猜名字；顶层工具列表里有同名工具时直接用顶层的。
+
 ### 方式 A：只挂附件不嵌正文
 
 无图预览需求时：phase1 → phase2 → markdown 三节，正文用附件**文件名**引用。

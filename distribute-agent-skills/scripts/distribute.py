@@ -17,7 +17,9 @@
 如需额外排除，用 --exclude 传 glob（按目标目录全路径匹配，可多次）。
 
 只覆盖、不删除：目标里多出的文件原样保留（删除会被权限拦，也可能删掉对方本地改动）。
-源里已删掉、目标里还留着的文件会在结尾列为「残留」，**只提示不动手**，由用户决定怎么处理。
+源里已删掉、目标里还留着的文件会在结尾列为「残留」，默认**只提示不动手**。
+用户看过残留清单、确认可删后，加 --prune 再跑一次：复制全部成功且 MD5 全一致后才删残留（连带清空的目录），
+有任何 MD5 不一致都不删。残留也可能是别的工具在副本里新加的本地文件，所以必须先看清单再 --prune。
 跳过 __pycache__。复制后逐文件比对 MD5，任何不一致都以非 0 退出。
 
 🔴 复制前先做「目标被别处改过」检查（2026-10-14 加：另一个会话直接改了 ~/.cursor 下的副本，
@@ -39,13 +41,14 @@ import sys
 import time
 from pathlib import Path
 
-# 默认分发对象：两个 workflow + CDP 取证 + 系统化排障/Jira 闭环 + 本分发工具自身（放最后，
-# 其他 agent 工具里也能直接用它分发；用户 2026-10-10 / 2026-10-14 要求）
+# 默认分发对象：两个 workflow + CDP 取证 + 系统化排障/Jira 闭环 + PM Sprint 看板（Jira）
+# + 本分发工具自身（放最后，其他 agent 工具里也能直接用它分发；用户 2026-10-10 / 2026-10-14 要求）
 DEFAULT_SKILLS = (
     "ai-driven-fullstack-workflow",
     "ai-driven-backend-workflow",
     "cdp-drive-real-chrome",
     "debugging-systematic-jira",
+    "pm-sprint-update-jira",
     "distribute-agent-skills",
 )
 ALWAYS_EXCLUDES = ("*/IdeaProjects/skills*", "*/ai.opencode.desktop/*")
@@ -178,6 +181,8 @@ def main() -> int:
                     help="同时更新 IdeaProjects 各仓库内的 skill 副本（备份目录 IdeaProjects/skills* 仍排除）")
     ap.add_argument("--include-skills-repo", action=argparse.BooleanOptionalAction, default=True,
                     help="是否更新 IdeaProjects/skills 本仓库（默认开；--no-include-skills-repo 关掉；skills - Copy 等备份仍排除）")
+    ap.add_argument("--prune", action="store_true",
+                    help="复制全部成功（MD5 0 不一致）后删除残留文件（源里没有、目标里还有的）。先不带本参数跑一次看清单，确认后再加")
     ap.add_argument("--commit-skills-repo", action="store_true",
                     help="分发后在 IdeaProjects/skills 里本地 commit 本次分发的 skill（依赖默认开启的 include-skills-repo；永不 push）")
     args = ap.parse_args()
@@ -217,18 +222,36 @@ def main() -> int:
     if args.dry_run:
         return 0
 
-    copied = bad = 0
+    copied = bad = skipped_same = 0
     orphans = []
     for t in targets:
         for s in skills:
             src_dir, dst_dir = args.src / s, t / s
+            # 目标是 junction 指回源（或同一物理目录）时，copyfile 会 SameFileError——已是最新，跳过
+            try:
+                if src_dir.resolve() == dst_dir.resolve():
+                    for f in skill_files(src_dir):
+                        skipped_same += 1
+                    continue
+            except OSError:
+                pass
             expected = set()
             for f in skill_files(src_dir):
                 rel = f.relative_to(src_dir)
                 expected.add(rel)
                 dst = dst_dir / rel
                 dst.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(f, dst)
+                try:
+                    if f.resolve() == dst.resolve():
+                        skipped_same += 1
+                        continue
+                except OSError:
+                    pass
+                try:
+                    shutil.copyfile(f, dst)
+                except shutil.SameFileError:
+                    skipped_same += 1
+                    continue
                 copied += 1
                 if md5(f) != md5(dst):
                     bad += 1
@@ -236,7 +259,8 @@ def main() -> int:
             for f in skill_files(dst_dir):
                 if f.relative_to(dst_dir) not in expected:
                     orphans.append(f)
-    print(f"复制 {copied} 个文件，MD5 不一致 {bad} 个")
+    same_note = f"（另跳过同文件/junction {skipped_same} 个）" if skipped_same else ""
+    print(f"复制 {copied} 个文件，MD5 不一致 {bad} 个{same_note}")
     if not bad:
         now = time.time()
         for t in targets:
@@ -249,8 +273,24 @@ def main() -> int:
         for t in targets:
             if t.parent.name == "IdeaProjects" and t.name == "skills":
                 commit_repo(t, skills)
+    if orphans and args.prune and not bad and not args.dry_run:
+        removed, failed = 0, []
+        for f in orphans:
+            try:
+                f.unlink()
+                removed += 1
+                parent = f.parent
+                while parent.name != "skills" and parent.exists() and not any(parent.iterdir()):
+                    parent.rmdir()
+                    parent = parent.parent
+            except OSError as e:
+                failed.append(f"{f}: {e}")
+        print(f"\n已清理残留 {removed} 个，失败 {len(failed)} 个")
+        for x in failed[:20]:
+            print(f"  {x}")
+        return 1 if failed else 0
     if orphans:
-        print(f"\n残留 {len(orphans)} 个（源里没有、目标里还留着；本脚本不删，交给你决定）：")
+        print(f"\n残留 {len(orphans)} 个（源里没有、目标里还留着；默认不删。看过清单、确认可删后加 --prune 重跑）：")
         for f in orphans[:40]:
             print(f"  {f}")
         if len(orphans) > 40:

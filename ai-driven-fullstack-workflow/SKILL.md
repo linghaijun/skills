@@ -5,6 +5,8 @@ description: "14-step fullstack dev workflow (Q&A→SPEC→Checklist→Plan→DD
 
 # AI 驱动型全栈开发全流程操作手册（AI-Driven Fullstack Workflow）
 
+> 🗓 **定期自检**：本 skill 每 7 天 review 一次，记录在同目录 `REVIEW.md`（开头「上次 review：日期」）。使用时若已到期，**主任务收尾后**按 [`references/self-review.md`](references/self-review.md) 做一次并在回复里说明。
+
 > **本 SKILL.md 是精简索引**：每步完整明细在 `references/step-NN-*.md`。执行到某步前先 Read 对应 reference 文件。
 >
 > 本流程 = 后端工作流（`ai-driven-backend-workflow`）的全部成熟机制（tasks.md 逐条编码、业务逻辑自检、全局一致性审查、经验教训库、OpenSpec 模板内嵌、交付收尾规范）+ 前端专属步骤（前端设计 / 前端人工验证 / 前后端契约一致性审查）。**前端不写单元测试/组件测试**（用户约定）。仅后端需求用 backend 工作流；纯前端页面美化（无接口改动）不必走本流程。
@@ -16,7 +18,7 @@ description: "14-step fullstack dev workflow (Q&A→SPEC→Checklist→Plan→DD
 
 | # | 原则 | 细则在哪 |
 |---|---|---|
-| 1 | **先分流再执行** — Step1 先判变更类型（A 新功能走全 14 步 / B 增强可跳 Step5、7 / C Bugfix 走精简路径），经用户确认后写入 Spec。分流**只降流程密度、不降质量门**；判不准按高一档走 | `step-01` §0 |
+| 1 | **先分流再执行** — Step1 先判变更类型（A 新功能走全 14 步 / B 增强可跳 Step5、7 / C Bugfix 走精简路径），经用户确认后把「变更类型 + 跳过清单」写成文首的 `跳过 StepN：理由` 行（A/B 在 Spec，**C 在 Step1 问答记录**）—— `validate_step.py` 按这些行跳过对应步，只写在对话里门禁不认、B/C 路径过不了交付门禁。分流**只降流程密度、不降质量门**；判不准按高一档走 | `step-01` §0 |
 | 2 | **顺序不可跳跃 + 门控分两档** — 上一步产出物是下一步的强制输入；🔴 **阻塞门控**（拦不可逆/对外的事）必须暂停等确认，🟡 **通知式门控**汇报后直接继续、有异议再回退 | 见下「门控档位」 |
 | 3 | **零臆测** — 事实性判断必须三选一：就地取证（标 `证据：file:line`）/ 文档取证 / 问用户。禁止「通常、应该是、按惯例」，禁止从命名推断语义 | `step-01` §零臆测 |
 | 4 | **影响面反查 + 全局落点** — 每次改动先问「还有哪些地方是同一件事」并 Grep 求证；同类点 ≥2 处上提共享层，=1 处就地改，**禁止就地打补丁** | `step-01` §影响面、`step-04` |
@@ -37,7 +39,7 @@ description: "14-step fullstack dev workflow (Q&A→SPEC→Checklist→Plan→DD
 
 | 档 | 在哪几步 | 怎么走 | 为什么是这档 |
 |---|---|---|---|
-| 🔴 **阻塞** | **③ Spec+Checklist**（合并确认）、**⑤ DDL**、**⑥ API 契约**、**⑪.3 业务逻辑自检**（⑪.4 实机验证、⑪.6 证据终验的阻塞点见 `step-11`）、**⑫ AI Review**、**⑬ 提交**、**⑭ 是否提测**，以及贯穿全程的**写操作授权** | 汇报 → **暂停等用户明确确认** → 才继续 | 拦的是**不可逆**（DDL 手工执行、git 提交、写 Jira、写数据）或**对外承诺**（API 契约、进了 Jira 的 AC）或**范围错了全白做**的事 |
+| 🔴 **阻塞** | **① 需求澄清收尾**（存在 `待PM确认` 时贴出清单并暂停，见 `step-01`）、**③ Spec+Checklist**（合并确认）、**⑤ DDL**、**⑥ API 契约**、**⑪.3 业务逻辑自检**（⑪.4 实机验证、⑪.6 证据终验的阻塞点见 `step-11`）、**⑫ AI Review**、**⑬ 提交**、**⑭ 是否提测**，以及贯穿全程的**写操作授权** | 汇报 → **暂停等用户明确确认** → 才继续 | 拦的是**不可逆**（DDL 手工执行、git 提交、写 Jira、写数据）或**对外承诺**（API 契约、进了 Jira 的 AC）或**范围错了全白做**的事 |
 | 🟡 **通知式** | ② Spec、④ 技术方案、⑦ 前端设计、⑧ 测试矩阵、⑨ tasks、⑩ 编码、⑪.1 单测 | 落盘 → 跑 `validate_step.py`（FAIL 必须修到通过）→ 一句话汇报 → **直接继续** | 产出物是文档/代码，**改起来几分钟且未产生不可逆后果**；用户随时可提异议，收到异议**回退重做本步及其下游** |
 
 🔴 **降级的是"等人点头"，不是"不检查"**：`validate_step.py` 每步照跑，FAIL 等同本步未完成。
@@ -75,7 +77,7 @@ description: "14-step fullstack dev workflow (Q&A→SPEC→Checklist→Plan→DD
 | 9 | 任务拆解（P0/P1/P2+估时，前后端任务组） | Step1~8 全部产出 | Step 9-tasks.md | `step-09-tasks.md` |
 | 10 | 逐条编码（后端+前端；复用+非功能落点；禁单测；**禁 git**） | tasks.md | 前后端生产代码 | `step-10-coding.md` |
 | 11 | 后端单测（前端不写测试）+编译自愈+逻辑自检+浏览器实机验证（可选）+**数据核对**+**证据按 AC 归档**+证据终验（**禁 git**） | 业务代码+测试矩阵+API文档+日志 | 全 Pass 后端单测 + Step 11-业务逻辑自检报告 +（可选）浏览器验证步骤 / 实机验证报告 + **`tests/AC-NN/` 四件套 + `tests/README.md` + `tests/.verify-state.json` + 验证进度看板** | `step-11-test-debug.md` |
-| 12 | AI Review（合规五维 + **缺陷猎捕** + lessons）（**禁 git**） | Step3/6/8文档+Step10/11代码 | Step 12-AI Review报告 | `step-12-ai-review.md` |
+| 12 | AI Review（合规 A~F + **缺陷猎捕 G** + lessons）（**禁 git**） | Step3/6/8文档+Step10/11代码 | Step 12-AI Review报告 | `step-12-ai-review.md` |
 | 13 | 全局一致性审查+交付收尾（**唯一允许 git 提交**） | Steps1~12 全部产出物 | Step 13-全局一致性审查报告 + **证据验收报告**（独立 subagent）+ **测试交接文档** + 提交 | `step-13-global-consistency-review.md`、`evidence-acceptance.md`、`test-handover.md` |
 | 14 | **AC ↔ Subtask 匹配与提测**（与验证态分离） | Checklist 全量 AC + 父票 Sub-task | `Step 14-AC-Subtask映射.md` + `.handover-state.json`（终态 `已提测` / `无需提测`）；确认提测则 Jira→Testing 并转交项目 `AGENTS.md` 约定的提测转交人 | `step-14-ac-subtask-handover.md` |
 
@@ -103,6 +105,8 @@ Step14 提测终态落定后做**经验沉淀**：四道准入（代价闸 → �
 原流程每步的出口是「汇报路径 → 暂停 → 人确认」，**人眼是唯一验收器** —— 模型说「我检查过了」和真检查过没法区分。
 `scripts/` 下的脚本把文档里已写死的规则变成可执行断言（只用标准库，不替代人工 Review）。**每个脚本的作用、文档同步检查、self-check 校验项、失败分类表 → `references/scripts.md`**。
 
+> 🔴 **解释器**：文档示例里的 `python` 在本机可能是**跑不起来的假别名**（Windows 商店版 `python.exe`，执行报 `Program 'python.exe' failed to run`）。先 `py -V`，能用就一律把示例里的 `python` 换成 `py`（其他平台 `python3`）；`preflight.py` 的「文档命令用的解释器」会替你把这件事查出来。
+
 | 脚本 | 何时跑 |
 |---|---|
 | `preflight.py` | **Step1 之前必跑**；有 BLOCK 项先修再开工 |
@@ -114,7 +118,7 @@ Step14 提测终态落定后做**经验沉淀**：四道准入（代价闸 → �
 | `validate_step.py` | **每步产出后、Review 之前** `--step N --record`；中断后 `--status`；改完 skill `--self-check` |
 | `verify_state.py` | 11.4 每条 AC `claim` / `fix` / `finish`、改代码后 `invalidate`；11.6 `final` 终验（登记后自动刷新看板） |
 | `surefire_aggregate.py` | 引用单测作为 AC 证据时 |
-| `verify_dashboard.py` | 看板服务 `--serve --port 8787`；手工改动后 `--dir` 刷新 |
+| `verify_dashboard.py` | 看板服务 `--serve --port 8787`（默认还开 8786 局域网「产品确认」页，不需要就 `--pm-port 0`）；手工改动后 `--dir` 刷新 |
 | `handover_match.py` / `handover_state.py` | Step14 |
 
 🔴 **validate_step 未通过 = 本步未完成，禁止进入下一步**，与人工 Review 门控同等效力：`FAIL` 必须修，`WARN` 必须在 Review 时逐条说明为何可接受。
@@ -125,9 +129,9 @@ Step14 提测终态落定后做**经验沉淀**：四道准入（代价闸 → �
 
 ## 执行指令
 
-0. **Step1 之前**跑 `scripts/preflight.py`，有 BLOCK 项先修；续跑场景先 `validate_step.py --status` 拿断点
-1. 启动时 Read `doc-output-and-context.md`；用户给 Jira 号 → MCP 取 summary/Sprint → 跑 `scripts/init_workdir.py` **自动建（或复用）需求目录**，不让用户手建（Epic 号先问做哪张 Story）
-1.5 看板**一律用服务模式打开**（静态打开不能保存 / 归档，内容也不实时）：先探测 `http://127.0.0.1:8787/api/ping`，通 = 常驻服务已在（本机开机自启：`docs/develop/tools/dashboard_server.py`，内部即本 skill 的看板服务）；不通再起 `verify_dashboard.py --all --develop docs/develop --serve --port 8787`。🔴 **每次开始任务（首次启动、续跑、新会话接手）的第一条回复就输出看板地址**，写成可点击的 markdown 链接：总览 `http://127.0.0.1:8787/`，需求详情 `http://127.0.0.1:8787/index.html#/<URL 编码后的需求目录>`（目录名含中文和空格，必须编码，否则链接点不开）；每个阻塞门控汇报末尾再附一行详情链接；**每步开始前跑 `qa_record.py changes`**，有看板改动先跟用户逐条确认、同步下游、`ack` 后再继续
+0. **Step1 之前**在**后端仓根**跑 `py scripts/preflight.py --project <后端仓根>`（默认 `.` 会体检错的仓，且在旧版里会顺手建出一棵 `docs/develop`），有 BLOCK 项先修；续跑场景先 `validate_step.py --status` 拿断点
+1. 启动时 Read `doc-output-and-context.md`；用户给 Jira 号 → MCP 取 summary/Sprint → 跑 `scripts/init_workdir.py --project <后端仓根>` **自动建（或复用）需求目录**，不让用户手建（Epic 号先问做哪张 Story）
+1.5 看板**一律用服务模式打开**（静态打开不能保存 / 归档，内容也不实时）：先探测 `http://127.0.0.1:8787/api/ping`，通 = 常驻服务已在（本机开机自启：`docs/develop/tools/dashboard_server.py`，内部即本 skill 的看板服务）；不通再起 `verify_dashboard.py --all --develop docs/develop --serve --port 8787`（🔴 相对路径以**后端仓根**为基准；该命令默认还会开 `0.0.0.0:8786` 的局域网「产品确认」页，不需要时加 `--pm-port 0`）。🔴 **每次开始任务（首次启动、续跑、新会话接手）的第一条回复就输出看板地址**，写成可点击的 markdown 链接：总览 `http://127.0.0.1:8787/`，需求详情 `http://127.0.0.1:8787/index.html#/<URL 编码后的需求目录>`（目录名含中文和空格，必须编码，否则链接点不开）；每个阻塞门控汇报末尾再附一行详情链接；**每步开始前跑 `qa_record.py changes`**，有看板改动先跟用户逐条确认、同步下游、`ack` 后再继续
 2. 进入第 N 步前 Read 对应 `step-NN-*.md`，严格按其中约束执行
 2.5 ⚡ 每步开工前判断本步有没有可并行的独立大块（多仓取证、按组编码、按 AC 组验证 / 对账、按维度 Review）→ 按 `subagent-acceleration.md` 三问决定是否派子 agent；**小活自己做，门控与写授权永不委派**
 3. 每步产出前对照 `lessons-learned.md` 该步相关 lesson 自检

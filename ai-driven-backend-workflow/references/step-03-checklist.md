@@ -146,7 +146,7 @@ Checklist 是可验收的**活文档**，条目状态随流程推进回写：
 | 状态 | 含义 | 由哪一步置位 |
 |------|------|--------------|
 | `[open]` | 已澄清，待实现/待验证 | Step3 落盘时默认 |
-| `[done]` | 实现完成且业务逻辑自检通过 | Step10.3 业务逻辑自检 该条 ✅ 后回写 |
+| `[done]` | 实现完成且业务逻辑自检通过 | Step10.3 业务逻辑自检 该条 ✅ 后回写；之后 10.4 实机结论不是「通过」、或证据验收「验收不通过」时**退回 `[open]`**（只有「通过」且验收通过的才保持 `[done]`） |
 | `[blocked]` | 被阻塞 / 本期不做 | 任意步骤，**必须附一行原因**并同步回写 Spec |
 | `[waived]` | 证据验收未通过、**用户明确放行**（不是「已验证」） | 交付前（证据验收之后）；证据验收报告必须有点名该 AC 的「风险接受记录」（放行范围 + 用户原话 + 风险），否则 `validate_step.py` 交付门禁 FAIL；交接文档「已知限制」要列出放行项请测试关注 |
 
@@ -184,15 +184,11 @@ Checklist 是可验收的**活文档**，条目状态随流程推进回写：
 - 条目编号以外的任何注释（含 `(来源: 代码 gap-check)` 这类标注——它只留在主文档）
 - 文件头尾的空行以外的任何多余字符
 
-**生成规则**：用 `python scripts/checklist_jira.py --dir <需求目录>` 生成（自动去掉「图示」行与「(来源: …)」括注；条目带 `[Story号]` 时按 Story 拆分），不要手工复制。
+**生成规则**：用 `py scripts/checklist_jira.py --dir <需求目录>` 生成（自动去掉「图示」行与「(来源: …)」括注；条目带 `[Story号]` 时按 Story 拆分），不要手工复制。
 - 内容从 `Step 3-Checklist.md` 机械抽取，**顺序、编号、前缀、状态标记（`[open]`/`[done]`/`[blocked]`/`[waived]`）与主文档逐字一致**，不得改写措辞
 - 主文档任何条目变更（新增/改号/改描述/状态回写）后，**必须重新生成本文件**，两者不允许漂移
 - 需要按 Jira issue 分开粘贴时，每个 issue 单独出一个文件：`Step 3-Checklist-Jira-{ISSUE-KEY}.txt`，内部仍只含条目本体
 - 扩展名用 `.txt` 而非 `.md`，避免编辑器/预览器插入额外渲染字符
-
-## Review 门控
-
-**两份产出物**落盘（完整版 + Jira 可拷贝纯净版）→ 汇报两个路径与条目数（含编号区间 `AC-01 ~ AC-NN`，可按前缀统计）→ **暂停** → 用户确认 → 进入 Step4
 
 ## 🔴 门控：Spec + Checklist 合并确认（阻塞）
 
@@ -205,11 +201,14 @@ Checklist 是可验收的**活文档**，条目状态随流程推进回写：
 
 ## Jira 同步（可选）
 
-Review 门控通过后，可将 Checklist 同步进 Jira 的**真实 checklist 字段**，交由 `prd-to-jira-ac` skill 执行（它负责字段探测、格式镜像、写入后回读校验）。
+Spec + Checklist 合并门控通过后，可将 Checklist 同步进 Jira 的**真实 checklist 字段**，交由 `prd-to-jira-ac` skill 执行（它负责字段探测、格式镜像、写入后回读校验）。
 
 - 同步前在 `Step 3-Checklist.md` 文首维护映射表：`| AC-NN | Jira Issue Key | 同步时间 |`
 - `AC-NN` 一经写入 Jira 即为**对外契约**，改号必须同步更新 Jira（见核心约束 4）
 - 人工粘贴走 `Step 3-Checklist-Jira.txt`（全选复制即可）；自动写入走 `prd-to-jira-ac`
+  - ⚠️ `prd-to-jira-ac` 是**独立 skill**，不一定装在当前 agent 工具的技能目录里（实测只装在 `~/.claude/skills`）。
+    当前工具里没有它就**不要卡住**：走人工粘贴那条路（`checklist_jira.py` 生成的纯净版已满足要求），
+    并在汇报里说明「本工具无 prd-to-jira-ac，改用人工粘贴」
 - **禁止**把 AC 直接写进 Jira description
 
 > **OpenSpec 对应**：GWT ≈ OpenSpec spec.md 的 Scenario WHEN/THEN。本工作流用 Given-When-Then（多 Given 前置）。详见 openspec-integration.md。

@@ -9,15 +9,15 @@ Agent 用 Atlassian MCP 拉好父票下 Sub-task 后，把结果落成 JSON 喂�
 用法:
     # 1) Agent 把 Jira 结果写成 subtasks.json（见下方格式）
     # 2) 匹配 + 落盘 + 写入 handover-state
-    python handover_match.py --dir docs/develop/xxx --parent CP-57189 \\
+    py handover_match.py --dir docs/develop/xxx --parent CP-57189 \\
         --subtasks subtasks.json --apply
 
     # 只出映射、不改 .handover-state.json
-    python handover_match.py --dir docs/develop/xxx --parent CP-57189 \\
+    py handover_match.py --dir docs/develop/xxx --parent CP-57189 \\
         --subtasks subtasks.json
 
     # 从 stdin 读 subtasks JSON
-    python handover_match.py --dir docs/develop/xxx --parent CP-57189 \\
+    py handover_match.py --dir docs/develop/xxx --parent CP-57189 \\
         --subtasks - --apply < subtasks.json
 
 subtasks.json 格式（任选其一）:
@@ -481,7 +481,7 @@ def main() -> int:
         return die(str(e))
     if not issues and not args.allow_empty:
         return die("subtasks 为空 —— 先用 Jira JQL 拉父票下 Sub-task 再喂进来；"
-                   "若 JQL 已确认父票下确实没有 Sub-task，加 --allow-empty（全员 unmatched，见 step-14 §与其它步骤的边界）")
+                   "若 JQL 已确认父票下确实没有 Sub-task，加 --allow-empty（全员 unmatched，见 AC↔Subtask 提测步（全栈 Step14 / 后端 Step13） §与其它步骤的边界）")
 
     acs, front = parse_checklist(ck)
     if not acs:

@@ -4,13 +4,14 @@
 需求级状态（互斥终态只有两个）:
     待匹配 → 已匹配待确认 → 已提测 | 无需提测
 
-用法:
-    python handover_state.py init     --dir docs/develop/xxx --parent CP-57189
-    python handover_state.py status   --dir docs/develop/xxx
-    python handover_state.py set-mapping --dir docs/develop/xxx --json mapping.json
-    python handover_state.py decide   --dir docs/develop/xxx --status 已提测
-    python handover_state.py decide   --dir docs/develop/xxx --status 无需提测 --note "用户说不提测"
-    python handover_state.py record-jira --dir docs/develop/xxx --key CP-1 --transition ok --assign ok
+用法（🔴 `--dir` 是主解析器参数，**必须写在子命令之前**，写在后面会直接报
+`the following arguments are required: --dir`；step-14 文档里的调用都是这个顺序）:
+    py handover_state.py --dir docs/develop/xxx init     --parent CP-57189
+    py handover_state.py --dir docs/develop/xxx status
+    py handover_state.py --dir docs/develop/xxx set-mapping --json mapping.json
+    py handover_state.py --dir docs/develop/xxx decide   --status 已提测
+    py handover_state.py --dir docs/develop/xxx decide   --status 无需提测 --note "用户说不提测"
+    py handover_state.py --dir docs/develop/xxx record-jira --key CP-1 --transition ok --assign ok
 """
 
 from __future__ import annotations
@@ -192,6 +193,10 @@ def cmd_record_jira(args: argparse.Namespace) -> int:
 
 
 def main() -> int:
+    # Windows 管道下 stdout 默认 cp1252，打印中文（含 --help）会 UnicodeEncodeError
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     ap = argparse.ArgumentParser(description="提测状态（与验证态分离）")
     ap.add_argument("--dir", required=True, help="docs/develop/{...} 目录")
     sub = ap.add_subparsers(dest="cmd", required=True)

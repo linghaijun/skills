@@ -6,10 +6,12 @@
 //       sameAsResponse（模型顺序 === 响应顺序）、domMatches（可见行顺序是响应前缀）、monotonic、nullPositions。
 // 🔴 为什么一定要等「这一次」的响应：列表 20~45s，点完立刻读 DOM 读到的是上一次的结果（CP-57189 AC-26 被退回的原因）。
 import { connect } from "../../scripts/conn.mjs"; import fs from "node:fs";
+import { makeBusyGone, waitBusyGone } from "./wait-lib.mjs";
 const [title, field, out] = process.argv.slice(2);
 if (!title || !field || !out) { console.error('usage: node sort-check.mjs "<header>" <dataIndex> out.json'); process.exit(2); }
 const attach = fs.readFileSync(new URL("./ads-table-attach.js", import.meta.url), "utf8");
 const c = await connect();
+const busyGone = makeBusyGone(c, { key: "__sortTick" });
 await c.send("Network.enable", { maxPostDataSize: 200000 });
 let reqId = null, reqBody = null, done = false;
 c.on((m) => {
@@ -20,10 +22,11 @@ const hdr = await c.ev(`(() => { const h=[...document.querySelectorAll('.surely-
   if(!h) return null; h.scrollIntoView({block:'nearest', inline:'center'}); const t=h.querySelector('.pacvue-table-title-cell-text')||h; const r=t.getBoundingClientRect(); return {x:r.x+r.width/2, y:r.y+r.height/2, before:h.querySelector('[data-sorttype]')?.getAttribute('data-sorttype')}; })()`);
 if (!hdr) { console.error("header not visible: " + title + "（先横滚 / 宽视口）"); process.exit(3); }
 await c.sleep(500); await c.click(hdr);
-for (let i = 0; i < 120 && !done; i++) await c.sleep(1000);
-if (!done) { console.error("no list response within 120s"); process.exit(4); }
+// 等「这一次」排序的响应回来：事件驱动轮询（旧写法 120×1s，最多白等 120s 才发现没响应）
+await c.waitFor("1", { total: 120000, min: 100, max: 500, label: "sort-response", until: () => done === true })
+  .catch(() => { if (!done) { console.error("no list response within 120s"); process.exit(4); } });
 const resp = JSON.parse((await c.send("Network.getResponseBody", { requestId: reqId })).body);
-for (let k = 0; k < 60; k++) { await c.sleep(1000); const busy = await c.ev(`[...document.querySelectorAll('.el-loading-mask,.pacvue-loading-mask')].some(e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0&&getComputedStyle(e).display!=='none'&&!e.closest('.el-dialog,.el-drawer')})`); if (!busy && k > 1) break; }
+await waitBusyGone(c, busyGone, { total: 60000, minTicks: 3, label: "sort-check" });
 await c.ev(attach);
 const page = await c.ev(`(() => { const L=window.__ct.dataList; const F=${JSON.stringify(field)};
   const h=[...document.querySelectorAll('.surely-table-header-cell')].find(e=>e.getBoundingClientRect().width>0 && e.innerText.replace(/\\s+/g,' ').trim()===${JSON.stringify(title)});
